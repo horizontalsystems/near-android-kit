@@ -1,0 +1,80 @@
+plugins {
+    id 'com.android.library'
+    id 'com.google.devtools.ksp'
+    id 'maven-publish'
+}
+
+// Local development: `./gradlew :nearkit:publishToMavenLocal` publishes the kit as
+// com.github.horizontalsystems:near-android-kit:local, so the wallet can consume an
+// unpublished kit build by setting nearKit = "local" in its version catalog.
+// JitPack ignores this and publishes under the commit hash as usual.
+afterEvaluate {
+    publishing {
+        publications {
+            release(MavenPublication) {
+                from components.release
+                groupId = 'com.github.horizontalsystems'
+                artifactId = 'near-android-kit'
+                version = 'local'
+            }
+        }
+    }
+}
+
+android {
+    namespace 'io.horizontalsystems.nearkit'
+    compileSdk 36
+
+    defaultConfig {
+        minSdk 27
+
+        testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+        consumerProguardFiles "consumer-rules.pro"
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+        }
+    }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+    publishing {
+        singleVariant("release") {}
+    }
+    lint {
+        targetSdk 33
+    }
+    testOptions {
+        targetSdk 33
+        unitTests.returnDefaultValues = true
+    }
+}
+
+dependencies {
+    // SLIP-10 Ed25519 derivation (BIP39 seed -> m/44'/397'/0')
+    implementation 'com.github.horizontalsystems:hd-wallet-kit-android:a74b51f'
+    // same version the wallet pins; hdwalletkit does not export it
+    implementation 'org.bouncycastle:bcprov-jdk15on:1.70'
+
+    implementation 'androidx.core:core-ktx:1.17.0'
+    implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2'
+
+    implementation 'com.squareup.retrofit2:retrofit:3.0.0'
+    implementation 'com.squareup.retrofit2:converter-gson:3.0.0'
+    implementation 'com.squareup.okhttp3:logging-interceptor:5.3.2'
+    implementation 'com.google.code.gson:gson:2.13.2'
+
+    implementation "androidx.room:room-runtime:$room_version"
+    implementation "androidx.room:room-ktx:$room_version"
+    ksp "androidx.room:room-compiler:$room_version"
+
+    testImplementation 'junit:junit:4.13.2'
+    testImplementation 'com.google.code.gson:gson:2.13.2'
+    // the live NearKitRobolectricTest runs the whole kit, Room included, on the JVM
+    testImplementation 'org.robolectric:robolectric:4.17'
+    testImplementation 'androidx.test:core:1.7.0'
+}
