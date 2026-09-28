@@ -19,8 +19,10 @@ import io.horizontalsystems.nearkit.transaction.Transaction as UnsignedTransacti
  * Builds, signs and submits transactions, recording each one locally as pending so the wallet
  * shows it immediately. Sends are serialized: concurrent sends would read the same access key
  * nonce and one of them would be rejected with InvalidNonce.
+ *
+ * Public only so apps can catch [SendError].
  */
-internal class TransactionSender(
+class TransactionSender internal constructor(
     private val accountId: String,
     private val rpcProvider: RpcProvider,
     private val storage: Storage,
@@ -28,7 +30,7 @@ internal class TransactionSender(
     private val sendMutex = Mutex()
 
     /** Builds and signs without submitting. The nonce and block hash come from the chain. */
-    suspend fun sign(signer: Signer, receiverId: String, actions: List<Action>): SignedTransaction =
+    internal suspend fun sign(signer: Signer, receiverId: String, actions: List<Action>): SignedTransaction =
         signWithHeight(signer, receiverId, actions).first
 
     private suspend fun signWithHeight(signer: Signer, receiverId: String, actions: List<Action>): Pair<SignedTransaction, Long> {
@@ -47,7 +49,7 @@ internal class TransactionSender(
         return signer.sign(tx) to accessKey.blockHeight
     }
 
-    suspend fun send(signer: Signer, receiverId: String, actions: List<Action>): Transaction = sendMutex.withLock {
+    internal suspend fun send(signer: Signer, receiverId: String, actions: List<Action>): Transaction = sendMutex.withLock {
         val (signed, height) = signWithHeight(signer, receiverId, actions)
         submit(signed, referenceHeight = height)
     }
@@ -61,7 +63,7 @@ internal class TransactionSender(
      * resending it to a node that then refuses the used nonce), so the record is kept as pending
      * to resolve or expire, instead of inviting the user to send again.
      */
-    suspend fun submit(signed: SignedTransaction, referenceHeight: Long?): Transaction {
+    internal suspend fun submit(signed: SignedTransaction, referenceHeight: Long?): Transaction {
         // the current height when the block hash's is unknown: a later expiry only keeps the record pending longer
         val height = referenceHeight ?: storage.getChainState()?.blockHeight ?: rpcProvider.latestBlock().height
         val (pending, tags) = TransactionConverter.pending(
@@ -135,7 +137,7 @@ internal class TransactionSender(
             SendError("Token storage deposit changed from $confirmed to $required yoctoNEAR")
     }
 
-    companion object {
+    internal companion object {
         /** Mainnet and testnet `transaction_validity_period`: a block hash older than this is rejected. */
         const val TRANSACTION_VALIDITY_BLOCKS = 86_400L
     }
