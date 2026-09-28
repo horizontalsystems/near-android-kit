@@ -14,15 +14,31 @@ object FtActions {
     val GAS: BigInteger = BigInteger.valueOf(30_000_000_000_000L)
 
     /**
+     * The most yoctoNEAR (0.1 NEAR) the kit attaches as a storage deposit. Real tokens ask for
+     * 0.00125 to about 0.0125 NEAR; the amount comes from the token contract (or the RPC node), so
+     * a scam token could otherwise ask for the whole balance.
+     */
+    val MAX_STORAGE_DEPOSIT: BigInteger = BigInteger.TEN.pow(23)
+
+    /**
      * NEAR [accountId] must deposit with the token contract before it can hold the token, or null
      * when it is already registered. A token transfer to an unregistered account fails.
+     *
+     * Throws [TransactionSender.SendError.StorageDepositTooHigh] above [MAX_STORAGE_DEPOSIT].
      */
     suspend fun storageDepositRequired(rpcProvider: RpcProvider, contractId: String, accountId: String): BigInteger? {
         val balance = rpcProvider.callFunctionJson(contractId, "storage_balance_of", accountIdArgs(accountId))
         if (!balance.isJsonNull) return null
         val bounds = rpcProvider.callFunctionJson(contractId, "storage_balance_bounds") as? JsonObject
             ?: throw InvalidResponse("storage_balance_bounds: not an object")
-        return bounds.optBigInteger("min") ?: throw InvalidResponse("storage_balance_bounds: missing min")
+        val min = bounds.optBigInteger("min") ?: throw InvalidResponse("storage_balance_bounds: missing min")
+        return checkStorageDeposit(min)
+    }
+
+    internal fun checkStorageDeposit(deposit: BigInteger): BigInteger {
+        if (deposit.signum() < 0) throw InvalidResponse("storage_balance_bounds: negative min")
+        if (deposit > MAX_STORAGE_DEPOSIT) throw TransactionSender.SendError.StorageDepositTooHigh(deposit)
+        return deposit
     }
 
     /** `storage_deposit` for [receiverId] when [storageDeposit] is set, then `ft_transfer`. Sent to the token contract. */

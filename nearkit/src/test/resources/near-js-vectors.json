@@ -44,5 +44,31 @@
       "signatureHex": "f4d959e5a070d44eadaab70197dc6fe4a9ec4bf4c62660c6e7bb269c7fe0075ebc0e98426af6e8a27a4c51ab7955b42847538f712ad2e0b750ae089cb8452b02",
       "signedTxBase64": "QAAAADU1MTBlMmI0NGNhZTZlYjgwN2UzZTBlNDVkNTc5ZGRhMDU4YzI3NGFiY2JhMTVlNWNiODQ2MzZmNWQxZWU0MTIAVRDitEyubrgH4+DkXVed2gWMJ0q8uhXly4Rjb10e5BIFAAAAAAAAABYAAAB1c2R0LnRldGhlci10b2tlbi5uZWFyZUD6oqObtl5DRDyunIkGwECjGG+GxqsgmWp6bNH0Jw4CAAAAAg8AAABzdG9yYWdlX2RlcG9zaXQyAAAAeyJhY2NvdW50X2lkIjoiYm9iLm5lYXIiLCJyZWdpc3RyYXRpb25fb25seSI6dHJ1ZX0A4FfrSBsAAAAASFY3GTzDQwAAAAAAAAACCwAAAGZ0X3RyYW5zZmVyLQAAAHsicmVjZWl2ZXJfaWQiOiJib2IubmVhciIsImFtb3VudCI6IjEwMDAwMDAifQDgV+tIGwAAAQAAAAAAAAAAAAAAAAAAAAD02VnloHDUTq2qtwGX3G/kqexL9MYmYMbnuyacf+AHXrwOmEJq9uiiekxRq3lVtChHU49xKtLgt1CuCJy4RSsC"
     }
+  ],
+  "nep413": [
+    {
+      "message": "Login to example.app",
+      "recipient": "example.app",
+      "callbackUrl": null,
+      "nonceHex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+      "publicKey": "ed25519:6j4b6zUaty6fD1awqcGCCU9JYGCWYUgdJhQrzfZhqE25",
+      "signatureBase64": "GJjvHyWUg3Ks/hO4zOSroJPDUu0GHIRgETkhCUYWjPx5LRVi0O0gWRdPM8ZCDr0N+9a5y7QNVGJA5mSz91WqAA=="
+    },
+    {
+      "message": "Login to example.app",
+      "recipient": "example.app",
+      "callbackUrl": "https://example.app/callback",
+      "nonceHex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+      "publicKey": "ed25519:6j4b6zUaty6fD1awqcGCCU9JYGCWYUgdJhQrzfZhqE25",
+      "signatureBase64": "dicn1U9wUCg9tfebgfugkZ2KZ98vo/nJ4f7NQWZnmcg1Kf9lYMZgAhthLpF3WqiA1m6A7JiHDzxZUfHKx/kKCg=="
+    },
+    {
+      "message": "Sign in ✓",
+      "recipient": "app.near",
+      "callbackUrl": "https://example.app/callback",
+      "nonceHex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+      "publicKey": "ed25519:6j4b6zUaty6fD1awqcGCCU9JYGCWYUgdJhQrzfZhqE25",
+      "signatureBase64": "QO5e1cIjyRv61O67ljU3SjGQgX/mq61RkiZcyfvJbgFCT568JYOPVQ4g5LdwnEDuIx3I/wVlmkruQifYx5CvAA=="
+    }
   ]
 }

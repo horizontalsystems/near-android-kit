@@ -8,6 +8,8 @@ import io.horizontalsystems.nearkit.models.TransactionSyncState
 import io.horizontalsystems.nearkit.network.AccountTxRow
 import io.horizontalsystems.nearkit.network.FastNearProvider
 import io.horizontalsystems.nearkit.network.RpcProvider
+import io.horizontalsystems.nearkit.network.getAsJsonObjectOrNull
+import io.horizontalsystems.nearkit.network.optString
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -154,8 +156,10 @@ internal class TransactionSyncer(
     }
 
     /**
-     * Resolves transactions the kit submitted: executed ones are replaced by their outcome; one
-     * that no node knows once the chain has passed its validity window is marked failed.
+     * Resolves transactions the kit submitted: executed ones are replaced by their outcome. One
+     * that neither the node nor the index knows once the chain has passed its validity window is
+     * marked failed. The node alone is not enough: it answers UNKNOWN_TRANSACTION for transactions
+     * older than its garbage collection window, and a "failed" send invites sending again.
      */
     private suspend fun resolvePending(blockHeight: Long): List<Transaction> {
         val resolved = mutableListOf<Transaction>()
@@ -174,8 +178,21 @@ internal class TransactionSyncer(
                     // RPC outcomes carry no block time; keep the submission time until the index has it
                     tx.copy(timestamp = pending.timestamp) to tags
                 }
-                status == null && pending.expiresAfterHeight != null && blockHeight > pending.expiresAfterHeight ->
-                    pending.copy(status = Transaction.Status.Failed, failure = EXPIRED) to TransactionConverter.tags(pending, accountId)
+                status == null && pending.expiresAfterHeight != null && blockHeight > pending.expiresAfterHeight -> {
+                    val indexed = try {
+                        fastNearProvider.transactions(listOf(pending.hash))
+                            .firstOrNull { it.getAsJsonObjectOrNull("transaction")?.optString("hash") == pending.hash }
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Throwable) {
+                        continue
+                    }
+                    if (indexed != null) {
+                        TransactionConverter.convert(indexed, accountId, pending.timestamp)
+                    } else {
+                        pending.copy(status = Transaction.Status.Failed, failure = EXPIRED) to TransactionConverter.tags(pending, accountId)
+                    }
+                }
                 else -> null
             } ?: continue
             if (updated.first.isPending) continue

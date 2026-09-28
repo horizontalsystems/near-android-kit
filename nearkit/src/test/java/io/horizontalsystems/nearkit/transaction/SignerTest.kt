@@ -13,7 +13,10 @@ import java.math.BigInteger
 
 /**
  * Vectors in near-js-vectors.json come from near-seed-phrase 0.2 (the derivation MyNearWallet and
- * near-cli use) and @near-js/transactions 2.5.1; see the file for the generating inputs.
+ * near-cli use), @near-js/transactions 2.5.1 and, for NEP-413 messages, @near-js/signers 2.5.1
+ * (`KeyPairSigner.signNep413Message`) run with borsh 2.0.0; see the file for the generating inputs.
+ * The borsh 1.0.0 near-js ships with writes one byte per UTF-16 unit instead of UTF-8, so its
+ * signatures of non-ASCII messages match neither Rust borsh nor the NEP.
  */
 class SignerTest {
 
@@ -93,6 +96,29 @@ class SignerTest {
             assertEquals(v["hash"].asString, decoded.hash)
             assertEquals(v["receiverId"].asString, decoded.transaction.receiverId)
         }
+    }
+
+    @Test
+    fun signsNep413MessagesLikeNearJs() {
+        val signer = Signer.fromSecretKey(vectors.getAsJsonArray("keys")[0].asJsonObject["secretKey"].asString)
+        for (element in vectors.getAsJsonArray("nep413")) {
+            val v = element.asJsonObject
+            val payload = MessagePayload(
+                message = v["message"].asString,
+                nonce = v["nonceHex"].asString.hexToBytes(),
+                recipient = v["recipient"].asString,
+                callbackUrl = v["callbackUrl"].takeUnless { it.isJsonNull }?.asString,
+            )
+            assertEquals(v["publicKey"].asString, signer.publicKey.toString())
+            assertEquals(v["signatureBase64"].asString, java.util.Base64.getEncoder().encodeToString(signer.sign(payload)))
+        }
+    }
+
+    @Test
+    fun nep413PayloadStartsWithTagNoTransactionCanHave() {
+        val payload = MessagePayload("hi", ByteArray(32), "app.near")
+        // 2^31 + 413, little-endian: as a transaction's signer id length it would be over 2 GB
+        assertEquals("9d010080", payload.encode().copyOfRange(0, 4).toHex())
     }
 
     private fun assertVector(name: String, actions: (JsonObject) -> List<Action>) {

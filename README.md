@@ -18,8 +18,9 @@ transactions without any third-party NEAR SDK.
 - **Balance.** `availableBalance` is the balance minus storage staking. Accounts using up to
   770 bytes need none (NEP-448); above that the whole usage is staked at 10^19 yocto per byte.
 - **Tokens.** NEP-141 balances, `ft_metadata`, and transfers that include the receiver's NEP-145
-  storage deposit when it is not registered yet. History reads NEP-297 events and the
-  plain-text logs of older contracts such as wrap.near.
+  storage deposit when it is not registered yet. The token contract sets that deposit, so it is
+  capped at 0.1 NEAR, and `sendFt` refuses to send when it differs from the confirmed estimate.
+  History reads NEP-297 events and the plain-text logs of older contracts such as wrap.near.
 - **Sending.** Transactions are Borsh-encoded, and the SHA-256 hash is signed with Ed25519.
   They are submitted with `send_tx` and tracked from pending to final. A pending send that no
   node knows once its block hash expires is marked failed.
@@ -46,7 +47,9 @@ kit.transactionsFlow.collect { changed -> /* new or updated Transaction records 
 val estimate = kit.estimateNearTransfer(to)          // fee, requiredBalance
 val max = kit.maxSendableNear(to)
 val tx = kit.sendNear(to, NearAmount.toYocto(BigDecimal("1.5")))
-val ftTx = kit.sendFt("usdt.tether-token.near", to, BigInteger("1000000"))
+val ftEstimate = kit.estimateFtTransfer("usdt.tether-token.near", to, BigInteger("1000000"))
+// show ftEstimate.storageDeposit to the user, then pass the confirmed estimate
+val ftTx = kit.sendFt("usdt.tether-token.near", to, BigInteger("1000000"), estimate = ftEstimate)
 ```
 
 Watch-only: `NearWallet.WatchOnly("alice.near")`. Sends then throw `NearKit.WalletError.WatchOnly`.
@@ -58,6 +61,12 @@ last item. A `Transaction` carries the account's NEAR movements (`nearTransfers`
 
 For dApps and swaps: `sendTransaction(receiverId, actions)`, `signTransaction(...)`, `submit(signed)`,
 and `Transaction.decode` / `SignedTransaction.decode` for Borsh payloads a dApp hands over.
+`signMessage(MessagePayload(...))` signs NEP-413 messages (`near_signMessage`); the kit never signs
+raw bytes, since a dApp could pass a transaction hash as the "message".
+
+A send fails with `SendError.Rejected` only when no node knows the transaction. Any other error
+may come after it reached the chain, so it stays in history as pending until it resolves or
+expires; show it rather than offering to send again.
 
 ## Layout
 

@@ -23,6 +23,8 @@ import io.horizontalsystems.nearkit.sync.TransactionSyncer
 import io.horizontalsystems.nearkit.transaction.Action
 import io.horizontalsystems.nearkit.transaction.FeeCalculator
 import io.horizontalsystems.nearkit.transaction.FtActions
+import io.horizontalsystems.nearkit.transaction.MessagePayload
+import io.horizontalsystems.nearkit.transaction.SignedMessage
 import io.horizontalsystems.nearkit.transaction.SignedTransaction
 import io.horizontalsystems.nearkit.transaction.Signer
 import io.horizontalsystems.nearkit.transaction.TransactionSender
@@ -212,14 +214,27 @@ class NearKit private constructor(
 
     /**
      * Sends a NEP-141 token. When the receiver is not registered with the token contract, the
-     * same transaction first pays its storage deposit (usually 0.00125 NEAR) from this account.
+     * same transaction first pays its storage deposit (usually 0.00125 NEAR, at most
+     * [FtActions.MAX_STORAGE_DEPOSIT]) from this account.
+     *
+     * Pass the [estimate] the user confirmed: the send then fails with
+     * [SendError.StorageDepositChanged] if the contract now asks for a different deposit.
      */
-    suspend fun sendFt(contractId: String, receiverId: String, amount: BigInteger, memo: String? = null): Transaction {
+    suspend fun sendFt(
+        contractId: String,
+        receiverId: String,
+        amount: BigInteger,
+        memo: String? = null,
+        estimate: FtTransferEstimate? = null,
+    ): Transaction {
         val signer = requireSigner()
         AccountId.validate(contractId)
         AccountId.validate(receiverId)
         require(amount.signum() > 0) { "Amount must be positive" }
         val storageDeposit = ftStorageDepositRequired(contractId, receiverId)
+        if (estimate != null && estimate.storageDeposit != storageDeposit) {
+            throw SendError.StorageDepositChanged(estimate.storageDeposit, storageDeposit)
+        }
         return send(signer, contractId, FtActions.transfer(receiverId, amount, memo, storageDeposit))
     }
 
@@ -248,8 +263,19 @@ class NearKit private constructor(
         return signer.sign(transaction)
     }
 
-    /** Submits a transaction signed elsewhere and records it as pending. */
+    /** Signs a NEP-413 message for WalletConnect `near_signMessage`. */
+    fun signMessage(payload: MessagePayload): SignedMessage {
+        val signer = requireSigner()
+        return SignedMessage(accountId, signer.publicKey, signer.sign(payload))
+    }
+
+    /**
+     * Submits a transaction signed elsewhere and records it as pending. It must be signed by this
+     * account: anything else would show up in the account's history as its own send. The node
+     * checks the signature and the key.
+     */
     suspend fun submit(signed: SignedTransaction): Transaction {
+        require(signed.transaction.signerId == accountId) { "Transaction is for signer ${signed.transaction.signerId}" }
         val tx = transactionSender.submit(signed, referenceHeight = null)
         syncAfterSend()
         return tx

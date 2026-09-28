@@ -27,7 +27,11 @@ class Signer(privateKey: ByteArray) {
     val secretKeyString: String
         get() = PublicKey.PREFIX + Base58.encode(keyParameters.encoded + publicKey.data)
 
-    fun sign(message: ByteArray): ByteArray {
+    /**
+     * Private on purpose: signing caller-chosen bytes would sign a transaction for anyone who
+     * passes its hash. Everything signed goes through a typed, domain-separated payload.
+     */
+    private fun sign(message: ByteArray): ByteArray {
         val signer = Ed25519Signer()
         signer.init(true, keyParameters)
         signer.update(message, 0, message.size)
@@ -39,6 +43,9 @@ class Signer(privateKey: ByteArray) {
         require(transaction.publicKey == publicKey) { "Transaction public key does not match the signer" }
         return SignedTransaction(transaction, sign(transaction.hash()))
     }
+
+    /** Signs a NEP-413 message (`near_signMessage`). */
+    fun sign(payload: MessagePayload): ByteArray = sign(payload.hash())
 
     companion object {
         const val COIN_TYPE = 397
