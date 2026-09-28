@@ -14,6 +14,13 @@ object FtActions {
     val GAS: BigInteger = BigInteger.valueOf(30_000_000_000_000L)
 
     /**
+     * Gas a token call is expected to burn, for the fee shown before sending. USDC burns about
+     * 2.4 Tgas for `ft_transfer` and less for `storage_deposit`; this leaves room for heavier
+     * contracts while staying far below [GAS].
+     */
+    const val EXPECTED_GAS: Long = 5_000_000_000_000L
+
+    /**
      * The most yoctoNEAR (0.1 NEAR) the kit attaches as a storage deposit. Real tokens ask for
      * 0.00125 to about 0.0125 NEAR; the amount comes from the token contract (or the RPC node), so
      * a scam token could otherwise ask for the whole balance.

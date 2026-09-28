@@ -170,12 +170,15 @@ class NearKit private constructor(
      * Fee and required balance for sending [actions] to [receiverId]. A transfer to an implicit
      * account that does not exist yet also pays the account creation charge (0.007 NEAR).
      */
-    suspend fun estimateFee(receiverId: String, actions: List<Action>): FeeCalculator.Estimate {
+    suspend fun estimateFee(receiverId: String, actions: List<Action>): FeeCalculator.Estimate =
+        estimateFee(receiverId, actions, expectedCallGas = null)
+
+    private suspend fun estimateFee(receiverId: String, actions: List<Action>, expectedCallGas: Long?): FeeCalculator.Estimate {
         loadFeeConfig()
         val gasPrice = syncer.chainStateFlow.value?.gasPrice ?: rpcProvider.latestBlock().gasPrice
         val implicit = AccountId.isImplicit(receiverId)
         val createsAccount = implicit && actions.any { it is Action.Transfer } && !doesAccountExist(receiverId)
-        return feeCalculator.estimate(actions, implicit, createsAccount, gasPrice)
+        return feeCalculator.estimate(actions, implicit, createsAccount, gasPrice, expectedCallGas)
     }
 
     suspend fun estimateNearTransfer(receiverId: String): FeeCalculator.Estimate =
@@ -189,7 +192,10 @@ class NearKit private constructor(
     suspend fun estimateFtTransfer(contractId: String, receiverId: String, amount: BigInteger, memo: String? = null): FtTransferEstimate {
         val storageDeposit = ftStorageDepositRequired(contractId, receiverId)
         val actions = FtActions.transfer(receiverId, amount, memo, storageDeposit)
-        return FtTransferEstimate(fee = estimateFee(contractId, actions), storageDeposit = storageDeposit)
+        return FtTransferEstimate(
+            fee = estimateFee(contractId, actions, expectedCallGas = FtActions.EXPECTED_GAS),
+            storageDeposit = storageDeposit,
+        )
     }
 
     private suspend fun loadFeeConfig() {

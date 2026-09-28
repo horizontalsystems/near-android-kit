@@ -18,7 +18,8 @@ class FeeCalculator(private val config: Config = Config.DEFAULT) {
 
     /**
      * @property fee yoctoNEAR the sender ends up paying: gas burnt at the current gas price plus
-     *   the account creation charge. For function calls it assumes all attached gas is used.
+     *   the account creation charge. For function calls it assumes all attached gas is used,
+     *   unless the estimate was given the gas a call is expected to use.
      * @property requiredBalance yoctoNEAR (besides deposits) the account must hold for the node
      *   to accept the transaction. Use it to compute the maximum sendable amount.
      */
@@ -85,7 +86,9 @@ class FeeCalculator(private val config: Config = Config.DEFAULT) {
      * for creating the account and its key, because at conversion time the runtime cannot know
      * whether the account exists.
      */
-    fun gas(actions: List<Action>, receiverIsImplicit: Boolean): Long {
+    fun gas(actions: List<Action>, receiverIsImplicit: Boolean): Long = gas(actions, receiverIsImplicit, expectedCallGas = null)
+
+    private fun gas(actions: List<Action>, receiverIsImplicit: Boolean, expectedCallGas: Long?): Long {
         var gas = config.actionReceipt.total
         for (action in actions) {
             gas += when (action) {
@@ -93,7 +96,8 @@ class FeeCalculator(private val config: Config = Config.DEFAULT) {
                     if (receiverIsImplicit) config.createAccount.total + config.addFullAccessKey.total else 0
                 is Action.FunctionCall -> {
                     val bytes = (action.methodName.toByteArray().size + action.args.size).toLong()
-                    config.functionCall.total + config.functionCallPerByte.total * bytes + action.gas.toLong()
+                    val callGas = action.gas.toLong().let { if (expectedCallGas != null) minOf(it, expectedCallGas) else it }
+                    config.functionCall.total + config.functionCallPerByte.total * bytes + callGas
                 }
                 else -> config.otherAction.total
             }
@@ -101,13 +105,24 @@ class FeeCalculator(private val config: Config = Config.DEFAULT) {
         return gas
     }
 
-    /** [createsAccount]: the receiver does not exist and a transfer will create it. */
-    fun estimate(actions: List<Action>, receiverIsImplicit: Boolean, createsAccount: Boolean, gasPrice: BigInteger): Estimate {
+    /**
+     * [createsAccount]: the receiver does not exist and a transfer will create it.
+     * [expectedCallGas]: gas each function call is expected to use, for the fee only. Unused
+     * attached gas is refunded, but the node still requires the balance to buy all of it.
+     */
+    fun estimate(
+        actions: List<Action>,
+        receiverIsImplicit: Boolean,
+        createsAccount: Boolean,
+        gasPrice: BigInteger,
+        expectedCallGas: Long? = null,
+    ): Estimate {
         val gas = BigInteger.valueOf(gas(actions, receiverIsImplicit))
+        val usedGas = BigInteger.valueOf(gas(actions, receiverIsImplicit, expectedCallGas))
         val charge = if (createsAccount) config.accountCreationCharge else BigInteger.ZERO
         return Estimate(
             gas = gas.toLong(),
-            fee = gas.multiply(gasPrice).add(charge),
+            fee = usedGas.multiply(gasPrice).add(charge),
             requiredBalance = gas.multiply(gasPrice.max(config.minGasPurchasePrice)).add(charge),
         )
     }
