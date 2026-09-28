@@ -31,6 +31,7 @@ class TransactionSenderTest {
     private val near = FakeNear()
     private lateinit var storage: Storage
     private lateinit var sender: TransactionSender
+    private val reported = mutableListOf<String>()
 
     private val signer = Signer.fromSecretKey(
         JsonParser.parseString(javaClass.classLoader!!.getResource("near-js-vectors.json")!!.readText())
@@ -48,7 +49,7 @@ class TransactionSenderTest {
     @Before
     fun setUp() {
         storage = FakeNear.storage()
-        sender = TransactionSender(accountId, near.rpcProvider, storage)
+        sender = TransactionSender(accountId, near.rpcProvider, storage) { reported += it.hash }
     }
 
     @After
@@ -65,6 +66,7 @@ class TransactionSenderTest {
         near.answer("send_tx", included)
         assertEquals(signed.hash, submit().hash)
         assertTrue(stored!!.isPending)
+        assertEquals(listOf(signed.hash), reported)
     }
 
     @Test
@@ -82,6 +84,7 @@ class TransactionSenderTest {
         near.answer("EXPERIMENTAL_tx_status", FakeNear.error("UNKNOWN_TRANSACTION"))
         assertThrows(SendError.Rejected::class.java) { submit() }
         assertNull(stored)
+        assertEquals(emptyList<String>(), reported)
     }
 
     @Test
@@ -104,5 +107,6 @@ class TransactionSenderTest {
         near.answer("send_tx", IOException("down"), IOException("down"))
         assertThrows(NoEndpointAvailable::class.java) { submit() }
         assertTrue(stored!!.isPending)
+        assertEquals(listOf(signed.hash), reported)
     }
 }

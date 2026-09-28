@@ -48,6 +48,11 @@ internal class TransactionSyncer(
     private val _transactionsFlow = MutableSharedFlow<List<Transaction>>(extraBufferCapacity = 16)
     val transactionsFlow: SharedFlow<List<Transaction>> = _transactionsFlow
 
+    /** Reports transactions saved outside a sync, such as a send's pending record. */
+    fun notifySaved(transactions: List<Transaction>) {
+        _transactionsFlow.tryEmit(transactions)
+    }
+
     fun setNotStarted() {
         syncState = SyncState.NotSynced(SyncError.NotStarted())
     }

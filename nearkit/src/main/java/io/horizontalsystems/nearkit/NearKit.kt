@@ -402,7 +402,9 @@ class NearKit private constructor(
             val transactionSyncer = TransactionSyncer(accountId, rpcProvider, fastNearProvider, storage)
             val syncTimer = SyncTimer(syncInterval, ConnectionManager(context))
             val syncer = Syncer(accountId, syncTimer, rpcProvider, fastNearProvider, transactionSyncer, storage)
-            val transactionSender = TransactionSender(accountId, rpcProvider, storage)
+            val transactionSender = TransactionSender(accountId, rpcProvider, storage) {
+                transactionSyncer.notifySaved(listOf(it))
+            }
 
             return NearKit(accountId, network, signer, syncer, transactionSyncer, transactionSender, rpcProvider, storage)
         }

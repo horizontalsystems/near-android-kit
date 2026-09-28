@@ -26,6 +26,8 @@ class TransactionSender internal constructor(
     private val accountId: String,
     private val rpcProvider: RpcProvider,
     private val storage: Storage,
+    /** Gets each record saved as pending, which no sync reports until it changes. */
+    private val onPendingSaved: (Transaction) -> Unit = {},
 ) {
     private val sendMutex = Mutex()
 
@@ -72,7 +74,10 @@ class TransactionSender internal constructor(
             expiresAfterHeight = height + TRANSACTION_VALIDITY_BLOCKS,
             nowSeconds = System.currentTimeMillis() / 1000,
         )
-        val savePending = { storage.saveTransactions(listOf(pending to tags)) }
+        val savePending = {
+            storage.saveTransactions(listOf(pending to tags))
+            onPendingSaved(pending)
+        }
 
         val error = try {
             rpcProvider.sendTransaction(Base64.getEncoder().encodeToString(signed.encode()), waitUntil = "INCLUDED")
