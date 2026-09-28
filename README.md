@@ -61,6 +61,12 @@ last item. A `Transaction` carries the account's NEAR movements (`nearTransfers`
 
 For dApps and swaps: `sendTransaction(receiverId, actions)`, `signTransaction(...)`, `submit(signed)`,
 and `Transaction.decode` / `SignedTransaction.decode` for Borsh payloads a dApp hands over.
+`signMessage(MessagePayload(...))` signs NEP-413 messages (`near_signMessage`); the kit never signs
+raw bytes, since a dApp could pass a transaction hash as the "message".
+
+A send fails with `SendError.Rejected` only when no node knows the transaction. Any other error
+may come after it reached the chain, so it stays in history as pending until it resolves or
+expires; show it rather than offering to send again.
 
 ## Layout
 

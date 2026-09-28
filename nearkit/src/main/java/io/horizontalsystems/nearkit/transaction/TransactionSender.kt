@@ -3,12 +3,14 @@ package io.horizontalsystems.nearkit.transaction
 import io.horizontalsystems.nearkit.crypto.Base58
 import io.horizontalsystems.nearkit.database.Storage
 import io.horizontalsystems.nearkit.models.Transaction
-import io.horizontalsystems.nearkit.network.NoEndpointAvailable
 import io.horizontalsystems.nearkit.network.RpcError
 import io.horizontalsystems.nearkit.network.RpcProvider
 import io.horizontalsystems.nearkit.sync.TransactionConverter
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 import java.math.BigInteger
 import java.util.Base64
 import io.horizontalsystems.nearkit.transaction.Transaction as UnsignedTransaction
@@ -53,32 +55,63 @@ internal class TransactionSender(
     /**
      * Submits an already signed transaction (e.g. one signed for a dApp). [referenceHeight] is the
      * height of its block hash when known; it bounds how long the record may stay pending.
+     *
+     * Only a rejection for a transaction no node knows is reported as [SendError.Rejected]. Any
+     * other failure may come after a node already accepted it (a dropped connection, or failover
+     * resending it to a node that then refuses the used nonce), so the record is kept as pending
+     * to resolve or expire, instead of inviting the user to send again.
      */
     suspend fun submit(signed: SignedTransaction, referenceHeight: Long?): Transaction {
-        val height = referenceHeight ?: storage.getChainState()?.blockHeight ?: 0
+        // the current height when the block hash's is unknown: a later expiry only keeps the record pending longer
+        val height = referenceHeight ?: storage.getChainState()?.blockHeight ?: rpcProvider.latestBlock().height
         val (pending, tags) = TransactionConverter.pending(
             signed.transaction,
             signed.hash,
             expiresAfterHeight = height + TRANSACTION_VALIDITY_BLOCKS,
             nowSeconds = System.currentTimeMillis() / 1000,
         )
+        val savePending = { storage.saveTransactions(listOf(pending to tags)) }
 
-        try {
+        val error = try {
             rpcProvider.sendTransaction(Base64.getEncoder().encodeToString(signed.encode()), waitUntil = "INCLUDED")
-        } catch (e: RpcError) {
-            if (e.name == RpcProvider.INVALID_TRANSACTION) {
-                throw SendError.Rejected(e.data?.toString() ?: e.message ?: e.name)
-            }
+            null
+        } catch (e: CancellationException) {
+            // cancelled mid-request: the transaction may be out
+            withContext(NonCancellable) { savePending() }
             throw e
-        } catch (e: NoEndpointAvailable) {
-            // The transaction may still have reached a node before the connection dropped. Keep
-            // it as pending so it resolves (or expires) instead of inviting a second send.
-            storage.saveTransactions(listOf(pending to tags))
-            throw e
+        } catch (e: Exception) {
+            e
         }
 
-        storage.saveTransactions(listOf(pending to tags))
+        if (error is RpcError && error.name == RpcProvider.INVALID_TRANSACTION) {
+            val rejected = SendError.Rejected(error.data?.toString() ?: error.message ?: error.name)
+            when (isKnown(signed)) {
+                false -> throw rejected
+                // an earlier attempt got it on chain; this is a refusal of the duplicate
+                true -> {
+                    savePending()
+                    return pending
+                }
+                // cannot tell: keep the record, which expires to failed if the rejection was real
+                null -> {
+                    savePending()
+                    throw rejected
+                }
+            }
+        }
+
+        savePending()
+        if (error != null) throw error
         return pending
+    }
+
+    /** Whether a node knows the transaction; null when that cannot be told right now. */
+    private suspend fun isKnown(signed: SignedTransaction): Boolean? = try {
+        rpcProvider.transactionStatus(signed.hash, signed.transaction.signerId) != null
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        null
     }
 
     sealed class SendError(message: String? = null) : Exception(message) {
