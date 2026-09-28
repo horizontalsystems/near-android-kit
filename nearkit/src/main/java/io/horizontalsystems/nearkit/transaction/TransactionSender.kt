@@ -9,6 +9,7 @@ import io.horizontalsystems.nearkit.network.RpcProvider
 import io.horizontalsystems.nearkit.sync.TransactionConverter
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import java.math.BigInteger
 import java.util.Base64
 import io.horizontalsystems.nearkit.transaction.Transaction as UnsignedTransaction
 
@@ -92,6 +93,13 @@ internal class TransactionSender(
 
         /** The node refused the transaction, e.g. `{"TxExecutionError":{"InvalidTxError":{"NotEnoughBalance":…}}}`. */
         class Rejected(val details: String) : SendError(details)
+
+        /** The token contract asks for more than [FtActions.MAX_STORAGE_DEPOSIT] to register the receiver. */
+        class StorageDepositTooHigh(val deposit: BigInteger) : SendError("Token storage deposit $deposit yoctoNEAR exceeds the limit")
+
+        /** The storage deposit the token contract asks for is not the one the user confirmed. */
+        class StorageDepositChanged(val confirmed: BigInteger?, val required: BigInteger?) :
+            SendError("Token storage deposit changed from $confirmed to $required yoctoNEAR")
     }
 
     companion object {

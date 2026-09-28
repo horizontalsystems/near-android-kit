@@ -212,14 +212,27 @@ class NearKit private constructor(
 
     /**
      * Sends a NEP-141 token. When the receiver is not registered with the token contract, the
-     * same transaction first pays its storage deposit (usually 0.00125 NEAR) from this account.
+     * same transaction first pays its storage deposit (usually 0.00125 NEAR, at most
+     * [FtActions.MAX_STORAGE_DEPOSIT]) from this account.
+     *
+     * Pass the [estimate] the user confirmed: the send then fails with
+     * [SendError.StorageDepositChanged] if the contract now asks for a different deposit.
      */
-    suspend fun sendFt(contractId: String, receiverId: String, amount: BigInteger, memo: String? = null): Transaction {
+    suspend fun sendFt(
+        contractId: String,
+        receiverId: String,
+        amount: BigInteger,
+        memo: String? = null,
+        estimate: FtTransferEstimate? = null,
+    ): Transaction {
         val signer = requireSigner()
         AccountId.validate(contractId)
         AccountId.validate(receiverId)
         require(amount.signum() > 0) { "Amount must be positive" }
         val storageDeposit = ftStorageDepositRequired(contractId, receiverId)
+        if (estimate != null && estimate.storageDeposit != storageDeposit) {
+            throw SendError.StorageDepositChanged(estimate.storageDeposit, storageDeposit)
+        }
         return send(signer, contractId, FtActions.transfer(receiverId, amount, memo, storageDeposit))
     }
 
