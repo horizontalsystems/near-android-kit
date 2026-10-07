@@ -19,6 +19,7 @@ import io.horizontalsystems.nearkit.network.optLong
 import io.horizontalsystems.nearkit.network.optString
 import io.horizontalsystems.nearkit.sync.SyncTimer
 import io.horizontalsystems.nearkit.sync.Syncer
+import io.horizontalsystems.nearkit.sync.TransactionConverter
 import io.horizontalsystems.nearkit.sync.TransactionSyncer
 import io.horizontalsystems.nearkit.transaction.Action
 import io.horizontalsystems.nearkit.transaction.FeeCalculator
@@ -116,6 +117,9 @@ class NearKit private constructor(
         storage.getTransactions(token, beforeTimestamp, beforeHash, limit)
 
     fun getTransaction(hash: String): Transaction? = storage.getTransaction(hash)
+
+    /** The [getTransactions] tokens [transaction] is listed under, for records from [transactionsFlow]. */
+    fun tags(transaction: Transaction): Set<String> = TransactionConverter.tags(transaction, accountId)
 
     fun getPendingTransactions(): List<Transaction> = storage.getPendingTransactions()
 

@@ -30,7 +30,8 @@ import java.math.BigInteger
         AccountState::class, ChainState::class, FtBalance::class, FtMetadata::class,
         Transaction::class, TransactionTag::class, TransactionSyncState::class,
     ],
-    version = 1,
+    // 2: history tags changed; the destructive fallback below rebuilds everything from the network
+    version = 2,
     exportSchema = false,
 )
 @TypeConverters(RoomTypeConverters::class)
