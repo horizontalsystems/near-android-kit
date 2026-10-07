@@ -11,11 +11,12 @@ internal object ApiClient {
 
     const val USER_AGENT = "near-android-kit/1.0 (HorizontalSystems; +https://github.com/horizontalsystems/near-android-kit)"
 
-    fun build(userAgent: String = USER_AGENT): OkHttpClient {
+    /** [fastNearApiKey] is sent to FastNEAR hosts only, see [FastNearAuth]. */
+    fun build(userAgent: String = USER_AGENT, fastNearApiKey: String? = null): OkHttpClient {
         val loggingInterceptor = HttpLoggingInterceptor { message -> logger.info(message) }
             .setLevel(HttpLoggingInterceptor.Level.BASIC)
 
-        return OkHttpClient.Builder()
+        val builder = OkHttpClient.Builder()
             .addInterceptor { chain ->
                 chain.proceed(
                     chain.request().newBuilder()
@@ -23,6 +24,11 @@ internal object ApiClient {
                         .build()
                 )
             }
+        if (!fastNearApiKey.isNullOrBlank()) {
+            builder.addInterceptor(FastNearAuth(fastNearApiKey))
+        }
+        // after the auth interceptor, so a request repeated without a rejected key is logged too
+        return builder
             .addInterceptor(loggingInterceptor)
             .connectTimeout(10, TimeUnit.SECONDS)
             .readTimeout(60, TimeUnit.SECONDS)

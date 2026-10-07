@@ -55,7 +55,11 @@ internal object TransactionConverter {
         val receiptsById = receipts.associateBy { it.id }
 
         val txOutcome = txOutcomeWrapper?.getAsJsonObjectOrNull("outcome")
-        val (status, failure) = finalStatus(txOutcome, receiptsById)
+        val (status, failure) = if (item.has("execution_outcome") && hasUnexecutedReceipts(txOutcome, receipts)) {
+            Transaction.Status.Pending to null
+        } else {
+            finalStatus(txOutcome, receiptsById)
+        }
 
         val burnt = (listOfNotNull(txOutcome) + receipts.mapNotNull { it.outcome })
             .mapNotNull { it.optBigInteger("tokens_burnt") }
@@ -198,6 +202,22 @@ internal object TransactionConverter {
             }
         }
         return Transaction.Status.Pending to null
+    }
+
+    /**
+     * FastNEAR serves a transaction from its first block on, while receipts are still executing,
+     * and its final status can already be settled then: a receipt that returns a value may have
+     * spawned others (a swap output, wrap.near's NEAR payout) that run in later blocks. Until
+     * every receipt an outcome created is present, the transfers are incomplete.
+     *
+     * Only for FastNEAR items: RPC results at EXECUTED_OPTIMISTIC may leave out gas refund
+     * receipts that never matter here, and would never look complete.
+     */
+    private fun hasUnexecutedReceipts(txOutcome: JsonObject?, receipts: List<Receipt>): Boolean {
+        val present = receipts.mapTo(mutableSetOf()) { it.id }
+        return (listOfNotNull(txOutcome) + receipts.mapNotNull { it.outcome })
+            .flatMap { outcome -> (outcome.get("receipt_ids") as? JsonArray)?.mapNotNull { it.takeIf { e -> e.isJsonPrimitive }?.asString } ?: emptyList() }
+            .any { it !in present }
     }
 
     private fun isSuccess(outcome: JsonObject): Boolean {

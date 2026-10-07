@@ -23,7 +23,7 @@ import java.util.logging.Logger
 
 /**
  * Drives one sync cycle per timer tick: latest block, account state, token balances, then
- * transaction history.
+ * transaction history. [syncState] covers the balances; history has its own state.
  */
 internal class Syncer(
     private val accountId: String,
@@ -154,11 +154,12 @@ internal class Syncer(
                 _ftBalancesFlow.update { emptyList() }
             }
 
-            transactionSyncer.sync(block.height)
-
             hasSyncedOnce = true
             consecutiveFailures = 0
             syncState = SyncState.Synced()
+
+            // reports its own failures, so an index outage or rate limit leaves balances synced
+            transactionSyncer.sync(block.height)
         } catch (error: CancellationException) {
             throw error
         } catch (error: Throwable) {
