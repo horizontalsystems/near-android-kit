@@ -134,8 +134,12 @@ internal interface TransactionDao {
     @Query("SELECT * FROM `Transaction` WHERE hash = :hash")
     fun get(hash: String): Transaction?
 
-    /** Records built from the RPC or predicted at send time have no block height yet; the index fills it in. */
-    @Query("SELECT hash FROM `Transaction` WHERE hash IN (:hashes) AND blockHeight IS NOT NULL")
+    /**
+     * Hashes the index needs not be asked for again. Records built from the RPC or predicted at
+     * send time have no block height yet, and a pending record from the index was still
+     * executing; the index fills both in.
+     */
+    @Query("SELECT hash FROM `Transaction` WHERE hash IN (:hashes) AND blockHeight IS NOT NULL AND status != 'Pending'")
     fun indexedHashes(hashes: List<String>): List<String>
 
     // Ties on timestamp are broken by hash so that paging with (timestamp, hash) is stable

@@ -401,9 +401,9 @@ class NearKit private constructor(
             val signer = signer(wallet)
             val accountId = accountId(wallet)
 
-            val client = ApiClient.build()
+            val client = ApiClient.build(fastNearApiKey = fastNearApiKey)
             val rpcProvider = RpcProvider.create(rpcUrls, client)
-            val fastNearProvider = FastNearProvider.create(network.apiUrl, network.txApiUrl, fastNearApiKey, client)
+            val fastNearProvider = FastNearProvider.create(network.apiUrl, network.txApiUrl, client)
             val storage = Storage(NearDatabaseManager.getDatabase(context, network, walletId))
             val transactionSyncer = TransactionSyncer(accountId, rpcProvider, fastNearProvider, storage)
             val syncTimer = SyncTimer(syncInterval, ConnectionManager(context))
@@ -425,9 +425,9 @@ class NearKit private constructor(
          * even before it exists, because that is where funds sent to the key arrive.
          */
         suspend fun findAccounts(publicKey: PublicKey, network: Network, fastNearApiKey: String? = null): List<String> {
-            val client = ApiClient.build()
+            val client = ApiClient.build(fastNearApiKey = fastNearApiKey)
             val rpcProvider = RpcProvider.create(network.rpcUrls, client)
-            val fastNearProvider = FastNearProvider.create(network.apiUrl, network.txApiUrl, fastNearApiKey, client)
+            val fastNearProvider = FastNearProvider.create(network.apiUrl, network.txApiUrl, client)
             val implicit = publicKey.implicitAccountId
             val named = fastNearProvider.accountIds(publicKey.toString())
                 .filter { it != implicit && AccountId.isValid(it) }

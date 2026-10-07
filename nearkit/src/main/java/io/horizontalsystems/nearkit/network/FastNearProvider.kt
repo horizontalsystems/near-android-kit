@@ -118,13 +118,8 @@ class FastNearProvider private constructor(
         const val PAGE_LIMIT = 200
         const val MAX_HASHES_PER_REQUEST = 20
 
-        fun create(apiUrl: URL, txApiUrl: URL, apiKey: String? = null, baseClient: OkHttpClient = ApiClient.build()): FastNearProvider {
-            val client = if (apiKey.isNullOrBlank()) baseClient else baseClient.newBuilder()
-                .addInterceptor { chain ->
-                    chain.proceed(chain.request().newBuilder().header("Authorization", "Bearer $apiKey").build())
-                }
-                .build()
-
+        /** [client] carries the API key when there is one, see [ApiClient.build]. */
+        fun create(apiUrl: URL, txApiUrl: URL, client: OkHttpClient = ApiClient.build()): FastNearProvider {
             fun retrofit(url: URL) = Retrofit.Builder()
                 .baseUrl(url)
                 .client(client)
