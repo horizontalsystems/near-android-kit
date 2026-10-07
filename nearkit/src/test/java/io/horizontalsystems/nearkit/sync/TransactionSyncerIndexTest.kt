@@ -5,6 +5,7 @@ import io.horizontalsystems.nearkit.FakeNear
 import io.horizontalsystems.nearkit.NearKit.SyncState
 import io.horizontalsystems.nearkit.database.Storage
 import io.horizontalsystems.nearkit.models.TransactionSyncState
+import io.horizontalsystems.nearkit.models.TransactionTag
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -68,6 +69,8 @@ class TransactionSyncerIndexTest {
         sync()
         assertTrue(stored.isSuccess)
         assertEquals(BigInteger("5000"), stored.nearTransfers.single { it.to == account }.amount)
+        // unwrapping pays NEAR out, so it shows in both histories
+        assertEquals(setOf(TransactionTag.TOKEN_NATIVE, "wrap.near"), TransactionConverter.tags(stored, account))
     }
 
     @Test

@@ -73,6 +73,8 @@ data class NearTransfer(
     val kind: Kind,
     /** False when the receipt failed; its deposit went back to the sender. */
     val success: Boolean,
+    /** The method a [Kind.FunctionCallDeposit] was attached to. */
+    val methodName: String? = null,
 ) {
     enum class Kind { Transfer, FunctionCallDeposit }
 }

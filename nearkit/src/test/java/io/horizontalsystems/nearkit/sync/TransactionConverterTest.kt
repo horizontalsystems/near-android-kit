@@ -71,11 +71,12 @@ class TransactionConverterTest {
         assertEquals(Transaction.Status.Success, tx.status)
         assertEquals(listOf(FtTransfer(USDT, FT_SENDER, FT_RECEIVER, BigInteger("5000000000"), null)), tx.ftTransfers)
         // the 1 yocto proof deposit is a NEAR movement to the token contract
-        assertEquals(listOf(NearTransfer(FT_SENDER, USDT, BigInteger.ONE, NearTransfer.Kind.FunctionCallDeposit, true)), tx.nearTransfers)
+        assertEquals(listOf(NearTransfer(FT_SENDER, USDT, BigInteger.ONE, NearTransfer.Kind.FunctionCallDeposit, true, "ft_transfer")), tx.nearTransfers)
         assertEquals(BigInteger("31368617837000000000").add(BigInteger("208972821341200000000")), tx.fee)
         assertEquals("ft_transfer", tx.actions.single().methodName)
         assertTrue(tx.actions.single().args!!.contains(FT_RECEIVER))
-        assertEquals(setOf(TransactionTag.TOKEN_NATIVE, USDT), tags)
+        // a token send belongs to the token's history only, despite the gas and the proof deposit
+        assertEquals(setOf(USDT), tags)
     }
 
     @Test
@@ -124,7 +125,8 @@ class TransactionConverterTest {
         assertEquals(listOf(FtTransfer(USDT, FT_SENDER, "bob.near", BigInteger("7"), "hi")), tx.ftTransfers)
         assertEquals(BigInteger("1250000000000000000001").negate(), tx.nearNetChange(FT_SENDER))
         assertEquals(100L, tx.expiresAfterHeight)
-        assertEquals(setOf(TransactionTag.TOKEN_NATIVE, USDT), tags)
+        // the receiver's storage deposit is part of the token send
+        assertEquals(setOf(USDT), tags)
     }
 
     @Test
@@ -134,15 +136,17 @@ class TransactionConverterTest {
         val (tx, tags) = TransactionConverter.convert(rpc, TESTNET_SENDER, 0)
 
         assertEquals(listOf(FtTransfer(WRAP, TESTNET_SENDER, TESTNET_RECEIVER, BigInteger("100000000000000000000000"), "nearkit")), tx.ftTransfers)
-        assertEquals(setOf(TransactionTag.TOKEN_NATIVE, WRAP), tags)
+        assertEquals(setOf(WRAP), tags)
     }
 
     @Test
     fun legacyWrapDepositIsAMint() {
         val rpc = JsonParser.parseString(resource("rpc-legacy-wrap.json")).asJsonObject
-        val (tx, _) = TransactionConverter.convert(rpc, TESTNET_SENDER, 0)
+        val (tx, tags) = TransactionConverter.convert(rpc, TESTNET_SENDER, 0)
 
         assertEquals(listOf(FtTransfer(WRAP, null, TESTNET_SENDER, BigInteger("500000000000000000000000"), null)), tx.ftTransfers)
+        // wrapping spends NEAR, so it shows in both histories
+        assertEquals(setOf(TransactionTag.TOKEN_NATIVE, WRAP), tags)
         // 0.5 NEAR wrapped plus the 0.00125 NEAR storage registration, both attached as deposits
         assertEquals(BigInteger("501250000000000000000000").negate(), tx.nearNetChange(TESTNET_SENDER))
         assertEquals(listOf("storage_deposit", "near_deposit"), tx.actions.map { it.methodName })
