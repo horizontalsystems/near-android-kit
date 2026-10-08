@@ -45,7 +45,48 @@ data class Transaction(
             else -> acc
         }
     }
+
+    /**
+     * The NEAR [accountId] gained or lost as a payment: [nearNetChange] without the NEAR that only
+     * accompanies a call. That is the 1 yoctoNEAR contracts demand as proof of a full-access key
+     * (NEP-141 `ft_*`, NEP-245, intents), the storage deposit that registers a receiver next to a
+     * token transfer, and the part of that deposit the contract sends back. It decides whether a
+     * transaction belongs to NEAR's history and the NEAR amount shown for it.
+     */
+    fun nearMoved(accountId: String): BigInteger {
+        val sendsToken = signerId == accountId && actions.any { isFtMethod(it.methodName) }
+        val accompanying = { t: NearTransfer ->
+            t.kind == NearTransfer.Kind.FunctionCallDeposit && t.from == accountId &&
+                (t.amount == BigInteger.ONE || isFtMethod(t.methodName) || (sendsToken && t.methodName == STORAGE_DEPOSIT))
+        }
+
+        val successful = nearTransfers.filter { it.success }
+        // what each contract may still send back of the registration deposits it got
+        val refundable = mutableMapOf<String, BigInteger>()
+        successful.filter { accompanying(it) && it.methodName == STORAGE_DEPOSIT }.forEach { t ->
+            refundable[t.to] = (refundable[t.to] ?: BigInteger.ZERO) + t.amount
+        }
+
+        return successful.fold(BigInteger.ZERO) { acc, t ->
+            val refund = t.to == accountId && t.kind == NearTransfer.Kind.Transfer &&
+                (refundable[t.from] ?: BigInteger.ZERO) >= t.amount
+            when {
+                accompanying(t) -> acc
+                refund -> {
+                    refundable[t.from] = refundable.getValue(t.from) - t.amount
+                    acc
+                }
+                t.to == accountId -> if (t.from == accountId) acc else acc + t.amount
+                t.from == accountId -> acc - t.amount
+                else -> acc
+            }
+        }
+    }
 }
+
+private const val STORAGE_DEPOSIT = "storage_deposit"
+
+private fun isFtMethod(methodName: String?) = methodName != null && methodName.startsWith("ft_")
 
 /** A top-level action, flattened for storage and display. */
 data class TxAction(
