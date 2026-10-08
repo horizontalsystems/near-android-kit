@@ -131,29 +131,22 @@ internal object TransactionConverter {
 
     /**
      * The histories [transaction] appears in, as other chains do it: a token's history holds its
-     * transfers, and NEAR's history holds transactions that move NEAR. Gas alone does not count,
-     * or every token send would show in NEAR's history too. Neither do the deposits a token call
-     * carries: NEP-141 requires 1 yoctoNEAR on ft_transfer, and registering a receiver attaches a
-     * storage deposit; both belong to the token send. A signed transaction that touches no token,
-     * such as adding a key, stays in NEAR's history.
+     * transfers, and NEAR's history holds transactions that move NEAR ([Transaction.nearMoved]).
+     * Gas alone does not count, or every token send would show in NEAR's history too, and neither
+     * does NEAR that failed to move or came back. A signed transaction that touches no token, such
+     * as adding a key, stays in NEAR's history.
      */
     fun tags(transaction: Transaction, accountId: String): Set<String> {
         val tags = mutableSetOf<String>()
         val signed = transaction.signerId == accountId
-        val callsToken = signed && transaction.actions.any { isTokenMethod(it.methodName) }
-        val movesNear = transaction.nearTransfers.any { transfer ->
-            (transfer.from == accountId || transfer.to == accountId) && transfer.amount.signum() > 0 &&
-                !(transfer.kind == NearTransfer.Kind.FunctionCallDeposit && isTokenMethod(transfer.methodName))
-        }
+        val callsToken = signed && transaction.actions.any { it.methodName?.startsWith("ft_") == true }
+        val movesNear = transaction.nearMoved(accountId).signum() != 0
         if (movesNear || (signed && !callsToken && transaction.ftTransfers.isEmpty())) tags += TransactionTag.TOKEN_NATIVE
         transaction.ftTransfers.forEach { tags += it.contractId }
         // a failed token send emits no event; keep it in that token's history anyway
         if (callsToken) tags += transaction.receiverId
         return tags
     }
-
-    private fun isTokenMethod(methodName: String?): Boolean =
-        methodName != null && (methodName.startsWith("ft_") || methodName == "storage_deposit")
 
     private fun receipts(item: JsonObject): List<Receipt> {
         // FastNEAR: receipts[] = { receipt: {receipt_id, predecessor_id, receiver_id, receipt}, execution_outcome }
