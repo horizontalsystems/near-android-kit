@@ -53,13 +53,25 @@ internal abstract class MainDatabase : RoomDatabase() {
 }
 
 internal object NearDatabaseManager {
-    private fun name(network: Network, walletId: String) = "Near-${network.name}-$walletId"
+    // One walletId can open several accounts the same key controls (implicit and named), so the
+    // account id is part of the name; otherwise their sync cursors and history would mix.
+    private fun prefix(network: Network, walletId: String) = "Near-${network.name}-$walletId"
+    private fun name(network: Network, walletId: String, accountId: String) = "${prefix(network, walletId)}-$accountId"
+    private val sqliteSuffixes = listOf("-journal", "-wal", "-shm")
 
-    fun getDatabase(context: Context, network: Network, walletId: String): MainDatabase =
-        MainDatabase.getInstance(context, name(network, walletId))
+    fun getDatabase(context: Context, network: Network, walletId: String, accountId: String): MainDatabase {
+        // Name used before the account id was added; its data is rebuilt from the network.
+        context.deleteDatabase(prefix(network, walletId))
+        return MainDatabase.getInstance(context, name(network, walletId, accountId))
+    }
 
+    /** Deletes the databases of every account opened under [walletId]. */
     fun clear(context: Context, network: Network, walletId: String) {
-        context.deleteDatabase(name(network, walletId))
+        val prefix = prefix(network, walletId)
+        context.databaseList()
+            .filter { name -> sqliteSuffixes.none { name.endsWith(it) } }
+            .filter { it == prefix || it.startsWith("$prefix-") }
+            .forEach { context.deleteDatabase(it) }
     }
 }
 
