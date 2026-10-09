@@ -80,5 +80,10 @@ class MainnetReadTest {
         assertTrue(NearKit.hasFullAccess("root.near", rootKey, network))
         assertEquals(false, NearKit.hasFullAccess("root.near", otherKey, network))
         assertEquals(false, NearKit.hasFullAccess("no-such-account-hs-test.near", rootKey, network))
+
+        val keys = NearKit.accessKeys("root.near", network)
+        assertTrue(keys.any { it.publicKey == rootKey.toString() && it.isFullAccess })
+        assertTrue(keys.any { it.publicKey != rootKey.toString() && it.isFullAccess })
+        assertTrue(NearKit.accessKeys("no-such-account-hs-test.near", network).isEmpty())
     }
 }
