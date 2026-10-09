@@ -408,7 +408,7 @@ class NearKit private constructor(
             val client = ApiClient.build(fastNearApiKey = fastNearApiKey)
             val rpcProvider = RpcProvider.create(rpcUrls, client)
             val fastNearProvider = FastNearProvider.create(network.apiUrl, network.txApiUrl, client)
-            val storage = Storage(NearDatabaseManager.getDatabase(context, network, walletId))
+            val storage = Storage(NearDatabaseManager.getDatabase(context, network, walletId, accountId))
             val transactionSyncer = TransactionSyncer(accountId, rpcProvider, fastNearProvider, storage)
             val syncTimer = SyncTimer(syncInterval, ConnectionManager(context))
             val syncer = Syncer(accountId, syncTimer, rpcProvider, fastNearProvider, transactionSyncer, storage)
@@ -419,6 +419,7 @@ class NearKit private constructor(
             return NearKit(accountId, network, signer, syncer, transactionSyncer, transactionSender, rpcProvider, storage)
         }
 
+        /** Deletes the stored data of every account opened under [walletId]. */
         fun clear(context: Context, network: Network, walletId: String) {
             NearDatabaseManager.clear(context, network, walletId)
         }
@@ -428,15 +429,46 @@ class NearKit private constructor(
          * the index knows about, each confirmed on chain. The implicit account is always first,
          * even before it exists, because that is where funds sent to the key arrive.
          */
-        suspend fun findAccounts(publicKey: PublicKey, network: Network, fastNearApiKey: String? = null): List<String> {
+        suspend fun findAccounts(
+            publicKey: PublicKey,
+            network: Network,
+            fastNearApiKey: String? = null,
+            rpcUrls: List<URL> = network.rpcUrls,
+        ): List<String> {
             val client = ApiClient.build(fastNearApiKey = fastNearApiKey)
-            val rpcProvider = RpcProvider.create(network.rpcUrls, client)
+            val rpcProvider = RpcProvider.create(rpcUrls, client)
             val fastNearProvider = FastNearProvider.create(network.apiUrl, network.txApiUrl, client)
             val implicit = publicKey.implicitAccountId
             val named = fastNearProvider.accountIds(publicKey.toString())
                 .filter { it != implicit && AccountId.isValid(it) }
                 .filter { id -> rpcProvider.viewAccessKey(id, publicKey.toString())?.isFullAccess == true }
             return listOf(implicit) + named
+        }
+
+        /** Current state of [accountId], or [AccountState.EMPTY] when it does not exist; no kit needed. */
+        suspend fun accountState(
+            accountId: String,
+            network: Network,
+            fastNearApiKey: String? = null,
+            rpcUrls: List<URL> = network.rpcUrls,
+        ): AccountState {
+            val rpcProvider = RpcProvider.create(rpcUrls, ApiClient.build(fastNearApiKey = fastNearApiKey))
+            return AccountState.of(rpcProvider.viewAccount(accountId))
+        }
+
+        /**
+         * Whether [publicKey] can sign anything for [accountId]. False when the key has only
+         * function-call access, is not on the account, or the account does not exist.
+         */
+        suspend fun hasFullAccess(
+            accountId: String,
+            publicKey: PublicKey,
+            network: Network,
+            fastNearApiKey: String? = null,
+            rpcUrls: List<URL> = network.rpcUrls,
+        ): Boolean {
+            val rpcProvider = RpcProvider.create(rpcUrls, ApiClient.build(fastNearApiKey = fastNearApiKey))
+            return rpcProvider.viewAccessKey(accountId, publicKey.toString())?.isFullAccess == true
         }
 
         fun isValidAccountId(accountId: String): Boolean = AccountId.isValid(accountId)

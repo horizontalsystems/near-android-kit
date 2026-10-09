@@ -1,6 +1,7 @@
 package io.horizontalsystems.nearkit
 
 import io.horizontalsystems.hdwalletkit.Mnemonic
+import io.horizontalsystems.nearkit.crypto.PublicKey
 import io.horizontalsystems.nearkit.network.FastNearProvider
 import io.horizontalsystems.nearkit.network.Network
 import io.horizontalsystems.nearkit.network.RpcProvider
@@ -62,5 +63,22 @@ class MainnetReadTest {
         val accounts = NearKit.findAccounts(publicKey, network)
         println("accounts for key: $accounts")
         assertEquals(accountId, accounts.first())
+    }
+
+    // root.near's full-access keys as of 2026-10-09 (view_access_key_list)
+    @Test
+    fun readsNamedAccountForPicker() = runBlocking {
+        assumeTrue(System.getenv("NEARKIT_INTEGRATION") == "true")
+        val rootKey = PublicKey.fromString("ed25519:bN6etqmzLFHuhdrT1Mzd2cHWH5ZjEHfFq2LdEnLZ9GD")
+        val otherKey = Signer.getInstance(Mnemonic().toSeed(List(11) { "abandon" } + "about")).publicKey
+
+        val state = NearKit.accountState("root.near", network)
+        assertTrue(state.exists)
+        assertTrue(state.amount.signum() > 0)
+        assertEquals(false, NearKit.accountState("no-such-account-hs-test.near", network).exists)
+
+        assertTrue(NearKit.hasFullAccess("root.near", rootKey, network))
+        assertEquals(false, NearKit.hasFullAccess("root.near", otherKey, network))
+        assertEquals(false, NearKit.hasFullAccess("no-such-account-hs-test.near", rootKey, network))
     }
 }

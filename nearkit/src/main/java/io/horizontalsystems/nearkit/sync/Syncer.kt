@@ -130,18 +130,7 @@ internal class Syncer(
             storage.saveChainState(chainState)
             _chainStateFlow.update { chainState }
 
-            val view = rpcProvider.viewAccount(accountId)
-            val accountState = if (view == null) {
-                AccountState.EMPTY
-            } else {
-                AccountState(
-                    exists = true,
-                    amount = view.amount,
-                    locked = view.locked,
-                    storageUsage = view.storageUsage,
-                    hasContract = view.hasContract,
-                )
-            }
+            val accountState = AccountState.of(rpcProvider.viewAccount(accountId))
             if (accountState != _accountStateFlow.value) {
                 storage.saveAccountState(accountState)
                 _accountStateFlow.update { accountState }

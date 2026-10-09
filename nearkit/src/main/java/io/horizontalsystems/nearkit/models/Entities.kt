@@ -2,6 +2,7 @@ package io.horizontalsystems.nearkit.models
 
 import androidx.room.Entity
 import androidx.room.PrimaryKey
+import io.horizontalsystems.nearkit.network.AccountView
 import java.math.BigInteger
 
 /** On-chain state of the kit's account. A single row; [exists] is false until the account receives NEAR. */
@@ -34,6 +35,18 @@ data class AccountState(
         val STORAGE_PRICE_PER_BYTE: BigInteger = BigInteger.TEN.pow(19)
 
         val EMPTY = AccountState(exists = false, amount = BigInteger.ZERO, locked = BigInteger.ZERO, storageUsage = 0, hasContract = false)
+
+        internal fun of(view: AccountView?): AccountState = if (view == null) {
+            EMPTY
+        } else {
+            AccountState(
+                exists = true,
+                amount = view.amount,
+                locked = view.locked,
+                storageUsage = view.storageUsage,
+                hasContract = view.hasContract,
+            )
+        }
     }
 }
 
