@@ -4,6 +4,7 @@ import com.google.gson.JsonElement
 import com.google.gson.JsonNull
 import com.google.gson.JsonObject
 import com.google.gson.JsonParser
+import io.horizontalsystems.nearkit.models.AccessKeyInfo
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import okhttp3.OkHttpClient
@@ -145,6 +146,28 @@ class RpcProvider private constructor(private val endpoints: List<Endpoint>) {
             blockHash = result.requireString("block_hash"),
             blockHeight = result.requireLong("block_height"),
         )
+    }
+
+    /** Every key on the account; empty when the account does not exist. */
+    suspend fun viewAccessKeyList(accountId: String): List<AccessKeyInfo> {
+        val result = try {
+            query(JsonObject().apply {
+                addProperty("request_type", "view_access_key_list")
+                addProperty("account_id", accountId)
+            })
+        } catch (e: RpcError) {
+            if (e.name == UNKNOWN_ACCOUNT) return emptyList()
+            throw e
+        }
+        val keys = result.getAsJsonArray("keys") ?: throw InvalidResponse("view_access_key_list: missing keys")
+        return keys.map { element ->
+            val key = element.asJsonObject
+            val permission = key.getAsJsonObjectOrNull("access_key")?.get("permission")
+            AccessKeyInfo(
+                publicKey = key.requireString("public_key"),
+                isFullAccess = permission?.isJsonPrimitive == true && permission.asString == "FullAccess",
+            )
+        }
     }
 
     /** Calls a view method. Returns the raw bytes the contract returned (usually JSON). */

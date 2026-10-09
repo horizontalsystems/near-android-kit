@@ -5,6 +5,7 @@ import io.horizontalsystems.nearkit.crypto.AccountId
 import io.horizontalsystems.nearkit.crypto.PublicKey
 import io.horizontalsystems.nearkit.database.NearDatabaseManager
 import io.horizontalsystems.nearkit.database.Storage
+import io.horizontalsystems.nearkit.models.AccessKeyInfo
 import io.horizontalsystems.nearkit.models.AccountState
 import io.horizontalsystems.nearkit.models.FtBalance
 import io.horizontalsystems.nearkit.models.FtMetadata
@@ -469,6 +470,17 @@ class NearKit private constructor(
         ): Boolean {
             val rpcProvider = RpcProvider.create(rpcUrls, ApiClient.build(fastNearApiKey = fastNearApiKey))
             return rpcProvider.viewAccessKey(accountId, publicKey.toString())?.isFullAccess == true
+        }
+
+        /** Every key on [accountId]; empty when the account does not exist. */
+        suspend fun accessKeys(
+            accountId: String,
+            network: Network,
+            fastNearApiKey: String? = null,
+            rpcUrls: List<URL> = network.rpcUrls,
+        ): List<AccessKeyInfo> {
+            val rpcProvider = RpcProvider.create(rpcUrls, ApiClient.build(fastNearApiKey = fastNearApiKey))
+            return rpcProvider.viewAccessKeyList(accountId)
         }
 
         fun isValidAccountId(accountId: String): Boolean = AccountId.isValid(accountId)

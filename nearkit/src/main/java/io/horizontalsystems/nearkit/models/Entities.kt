@@ -50,6 +50,13 @@ data class AccountState(
     }
 }
 
+/** A key on an account. Function-call keys can only call the contract methods they were made for. */
+data class AccessKeyInfo(
+    /** In `ed25519:<base58>` form. */
+    val publicKey: String,
+    val isFullAccess: Boolean,
+)
+
 /** Latest final block seen and the gas price in it. */
 @Entity
 data class ChainState(
