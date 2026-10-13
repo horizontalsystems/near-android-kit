@@ -22,8 +22,9 @@ enum class Network(
         rpcUrls = listOf(
             URL("https://free.rpc.fastnear.com/"),
             URL("https://near.drpc.org/"),
-            URL("https://rpc.shitzuapes.xyz/"),
             URL("https://rpc.mainnet.near.org/"),
+            // a community node with no published operator: asked only when the others fail
+            URL("https://rpc.shitzuapes.xyz/"),
         ),
         apiUrl = URL("https://api.fastnear.com/"),
         txApiUrl = URL("https://tx.main.fastnear.com/"),

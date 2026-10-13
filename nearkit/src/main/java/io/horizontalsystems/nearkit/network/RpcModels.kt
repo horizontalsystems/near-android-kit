@@ -10,11 +10,19 @@ import java.math.BigInteger
  * [data] is the error payload, e.g. `{"TxExecutionError":{"InvalidTxError":"Expired"}}`.
  */
 class RpcError(val name: String, val data: JsonElement?, message: String?) : Exception("$name${message?.let { ": $it" } ?: ""}") {
-    /** Every node would answer the same, so there is no point asking the next endpoint. */
-    val isDeterministic: Boolean get() = name !in RETRYABLE
+    /**
+     * Every node would answer the same, so there is no point asking the next endpoint. Only
+     * errors known to be about the request count: a proxy or a new nearcore version can answer
+     * with a name the kit has never seen, and another node may well serve the request.
+     */
+    val isDeterministic: Boolean get() = name in DETERMINISTIC
 
     companion object {
-        private val RETRYABLE = setOf("TIMEOUT_ERROR", "INTERNAL_ERROR", "NO_SYNCED_BLOCKS", "NOT_SYNCED_YET", "UNAVAILABLE_SHARD", "SERVER_ERROR")
+        private val DETERMINISTIC = setOf(
+            "UNKNOWN_ACCOUNT", "UNKNOWN_ACCESS_KEY", "UNKNOWN_TRANSACTION", "INVALID_TRANSACTION",
+            "UNKNOWN_BLOCK", "UNKNOWN_CHUNK", "UNKNOWN_RECEIPT", "INVALID_ACCOUNT",
+            "NO_CONTRACT_CODE", "CONTRACT_EXECUTION_ERROR", "PARSE_ERROR",
+        )
     }
 }
 

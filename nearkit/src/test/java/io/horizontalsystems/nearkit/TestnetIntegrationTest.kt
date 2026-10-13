@@ -1,6 +1,7 @@
 package io.horizontalsystems.nearkit
 
 import io.horizontalsystems.hdwalletkit.Mnemonic
+import io.horizontalsystems.nearkit.crypto.AccountId
 import io.horizontalsystems.nearkit.crypto.Base58
 import io.horizontalsystems.nearkit.models.FtTransfer
 import io.horizontalsystems.nearkit.models.NearAmount
@@ -70,7 +71,7 @@ class TestnetIntegrationTest {
         assertEquals(Transaction.Status.Success, transfer.status)
         assertEquals(amount.negate(), transfer.nearNetChange(senderId))
         assertEquals(amount, rpc.viewAccount(receiver)!!.amount)
-        val estimate = FeeCalculator().estimate(listOf(Action.Transfer(amount)), receiverIsImplicit = true, createsAccount = true, gasPrice = block.gasPrice)
+        val estimate = FeeCalculator().estimate(listOf(Action.Transfer(amount)), receiver = AccountId.Type.NearImplicit, createsAccount = true, gasPrice = block.gasPrice)
         println("transfer ${transfer.hash}: fee ${transfer.fee} (estimate ${estimate.fee}, required ${estimate.requiredBalance})")
         assertTrue("fee ${transfer.fee} above estimate ${estimate.fee}", transfer.fee!! <= estimate.fee)
 

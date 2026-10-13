@@ -12,6 +12,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.math.BigInteger
+import java.net.URL
 import java.util.Base64
 import io.horizontalsystems.nearkit.transaction.Transaction as UnsignedTransaction
 
@@ -74,17 +75,18 @@ class TransactionSender internal constructor(
             expiresAfterHeight = height + TRANSACTION_VALIDITY_BLOCKS,
             nowSeconds = System.currentTimeMillis() / 1000,
         )
-        val savePending = {
-            storage.saveTransactions(listOf(pending to tags))
-            onPendingSaved(pending)
-        }
+        // Saved before sending: once send_tx is out the transaction may be on chain, and a record
+        // that failed to save then, or a process killed mid-request, would invite a second send.
+        // It is reported only once the outcome is known, so a clean rejection never shows up.
+        storage.saveTransactions(listOf(pending to tags))
 
+        val reached = mutableSetOf<URL>()
         val error = try {
-            rpcProvider.sendTransaction(Base64.getEncoder().encodeToString(signed.encode()), waitUntil = "INCLUDED")
+            rpcProvider.sendTransaction(Base64.getEncoder().encodeToString(signed.encode()), waitUntil = "INCLUDED", reached)
             null
         } catch (e: CancellationException) {
             // cancelled mid-request: the transaction may be out
-            withContext(NonCancellable) { savePending() }
+            withContext(NonCancellable) { onPendingSaved(pending) }
             throw e
         } catch (e: Exception) {
             e
@@ -92,29 +94,35 @@ class TransactionSender internal constructor(
 
         if (error is RpcError && error.name == RpcProvider.INVALID_TRANSACTION) {
             val rejected = SendError.Rejected(error.data?.toString() ?: error.message ?: error.name)
-            when (isKnown(signed)) {
-                false -> throw rejected
+            when (isKnown(signed, reached)) {
+                false -> {
+                    storage.deleteTransaction(pending.hash)
+                    throw rejected
+                }
                 // an earlier attempt got it on chain; this is a refusal of the duplicate
                 true -> {
-                    savePending()
+                    onPendingSaved(pending)
                     return pending
                 }
                 // cannot tell: keep the record, which expires to failed if the rejection was real
                 null -> {
-                    savePending()
+                    onPendingSaved(pending)
                     throw rejected
                 }
             }
         }
 
-        savePending()
+        onPendingSaved(pending)
         if (error != null) throw error
         return pending
     }
 
-    /** Whether a node knows the transaction; null when that cannot be told right now. */
-    private suspend fun isKnown(signed: SignedTransaction): Boolean? = try {
-        rpcProvider.transactionStatus(signed.hash, signed.transaction.signerId) != null
+    /**
+     * Whether a node the send reached knows the transaction; null when that cannot be told right
+     * now. A node that failed before the rejecting one answered may still have accepted it.
+     */
+    private suspend fun isKnown(signed: SignedTransaction, reached: Set<URL>): Boolean? = try {
+        rpcProvider.isTransactionKnown(signed.hash, signed.transaction.signerId, reached)
     } catch (e: CancellationException) {
         throw e
     } catch (e: Exception) {
@@ -130,6 +138,9 @@ class TransactionSender internal constructor(
 
         /** Transfers to a named account that does not exist fail on chain and are refused up front. */
         class ReceiverNotFound(val receiverId: String) : SendError("Account $receiverId does not exist")
+
+        /** A token sent to its own contract is credited to the contract and lost. */
+        class ReceiverIsTokenContract : SendError("The receiver is the token contract itself")
 
         /** The node refused the transaction, e.g. `{"TxExecutionError":{"InvalidTxError":{"NotEnoughBalance":…}}}`. */
         class Rejected(val details: String) : SendError(details)

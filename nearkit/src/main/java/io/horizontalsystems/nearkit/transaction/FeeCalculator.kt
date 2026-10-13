@@ -1,6 +1,7 @@
 package io.horizontalsystems.nearkit.transaction
 
 import com.google.gson.JsonObject
+import io.horizontalsystems.nearkit.crypto.AccountId
 import io.horizontalsystems.nearkit.network.getAsJsonObjectOrNull
 import io.horizontalsystems.nearkit.network.optBigInteger
 import io.horizontalsystems.nearkit.network.optLong
@@ -10,18 +11,19 @@ import java.math.BigInteger
  * What a transaction costs, from the runtime fee config (`EXPERIMENTAL_protocol_config`).
  *
  * Converting the transaction burns the "send" costs and executing its receipt the "execution"
- * costs; a function call also buys the gas attached to it. Gas is bought up front at no less
- * than `min_gas_purchase_price` and burnt at the block gas price, and the difference comes back
- * as a refund. So the balance a send needs is well above what it finally costs.
+ * costs; a function call also buys the gas attached to it. Execution gas is bought up front at
+ * no less than `min_gas_purchase_price` and burnt at the block gas price, and the difference
+ * comes back as a refund. So the balance a send needs is well above what it finally costs.
  */
 class FeeCalculator(private val config: Config = Config.DEFAULT) {
 
     /**
      * @property fee yoctoNEAR the sender ends up paying: gas burnt at the current gas price plus
-     *   the account creation charge. For function calls it assumes all attached gas is used,
+     *   what the account creation charge adds on top of the burnt creation gas. For function calls it assumes all attached gas is used,
      *   unless the estimate was given the gas a call is expected to use.
      * @property requiredBalance yoctoNEAR (besides deposits) the account must hold for the node
-     *   to accept the transaction. Use it to compute the maximum sendable amount.
+     *   to accept the transaction, with the send part priced at [SEND_GAS_PRICE_MARGIN] times the
+     *   gas price. Use it to compute the maximum sendable amount.
      */
     class Estimate(val gas: Long, val fee: BigInteger, val requiredBalance: BigInteger)
 
@@ -82,50 +84,92 @@ class FeeCalculator(private val config: Config = Config.DEFAULT) {
     }
 
     /**
-     * Total gas for [actions]. A transfer to a NEAR-implicit or ETH-implicit account always pays
-     * for creating the account and its key, because at conversion time the runtime cannot know
-     * whether the account exists.
+     * Total gas for [actions] sent to an account of [receiver] type. A transfer to an account the
+     * runtime can create always pays for creating it, because at conversion time the runtime
+     * cannot know whether the account exists (nearcore `transfer_send_fee`/`transfer_exec_fee`):
+     * a NEAR-implicit account also gets its full access key, an ETH-implicit or deterministic one
+     * does not.
      */
-    fun gas(actions: List<Action>, receiverIsImplicit: Boolean): Long = gas(actions, receiverIsImplicit, expectedCallGas = null)
+    fun gas(actions: List<Action>, receiver: AccountId.Type): Long = gas(actions, receiver, expectedCallGas = null).total.toLongClamped()
 
-    private fun gas(actions: List<Action>, receiverIsImplicit: Boolean, expectedCallGas: Long?): Long {
-        var gas = config.actionReceipt.total
+    private class Gas(val send: BigInteger, val execution: BigInteger) {
+        val total: BigInteger get() = send + execution
+    }
+
+    private fun gas(actions: List<Action>, receiver: AccountId.Type, expectedCallGas: Long?): Gas {
+        var send = BigInteger.valueOf(config.actionReceipt.first)
+        var execution = BigInteger.valueOf(config.actionReceipt.second)
+        fun add(cost: Pair<Long, Long>, times: Long = 1) {
+            send += BigInteger.valueOf(cost.first) * BigInteger.valueOf(times)
+            execution += BigInteger.valueOf(cost.second) * BigInteger.valueOf(times)
+        }
         for (action in actions) {
-            gas += when (action) {
-                is Action.Transfer -> config.transfer.total +
-                    if (receiverIsImplicit) config.createAccount.total + config.addFullAccessKey.total else 0
-                is Action.FunctionCall -> {
-                    val bytes = (action.methodName.toByteArray().size + action.args.size).toLong()
-                    val callGas = action.gas.toLong().let { if (expectedCallGas != null) minOf(it, expectedCallGas) else it }
-                    config.functionCall.total + config.functionCallPerByte.total * bytes + callGas
+            when (action) {
+                is Action.Transfer -> {
+                    add(config.transfer)
+                    when (receiver) {
+                        AccountId.Type.Named -> Unit
+                        AccountId.Type.NearImplicit -> {
+                            add(config.createAccount)
+                            add(config.addFullAccessKey)
+                        }
+                        AccountId.Type.EthImplicit, AccountId.Type.Deterministic -> add(config.createAccount)
+                    }
                 }
-                else -> config.otherAction.total
+                is Action.FunctionCall -> {
+                    add(config.functionCall)
+                    add(config.functionCallPerByte, (action.methodName.toByteArray().size + action.args.size).toLong())
+                    // attached gas comes from a dApp too: a u64 that does not fit a Long must not wrap
+                    execution += if (expectedCallGas != null) action.gas.min(BigInteger.valueOf(expectedCallGas)) else action.gas
+                }
+                else -> add(config.otherAction)
             }
         }
-        return gas
+        return Gas(send, execution)
     }
 
     /**
      * [createsAccount]: the receiver does not exist and a transfer will create it.
      * [expectedCallGas]: gas each function call is expected to use, for the fee only. Unused
      * attached gas is refunded, but the node still requires the balance to buy all of it.
+     *
+     * The node takes the send part at the block gas price and buys the rest up front at no less
+     * than `min_gas_purchase_price` (nearcore `calculate_tx_cost`). The required balance prices
+     * the send part at [SEND_GAS_PRICE_MARGIN] times the gas price, so a transaction built on it
+     * survives a rising gas price.
+     *
+     * The account creation charge is not part of the required balance: the node takes it out of
+     * the refund for the `create_account` execution gas, bought at the purchase price (nearcore
+     * `refund_unspent_gas_and_deposits`, NEP-642). The fee only adds the part of the charge the
+     * burnt `create_account` execution gas does not already cover.
      */
     fun estimate(
         actions: List<Action>,
-        receiverIsImplicit: Boolean,
+        receiver: AccountId.Type,
         createsAccount: Boolean,
         gasPrice: BigInteger,
         expectedCallGas: Long? = null,
     ): Estimate {
-        val gas = BigInteger.valueOf(gas(actions, receiverIsImplicit))
-        val usedGas = BigInteger.valueOf(gas(actions, receiverIsImplicit, expectedCallGas))
-        val charge = if (createsAccount) config.accountCreationCharge else BigInteger.ZERO
+        val full = gas(actions, receiver, expectedCallGas = null)
+        val used = gas(actions, receiver, expectedCallGas)
+        val creationGasCost = BigInteger.valueOf(config.createAccount.second) * gasPrice
+        val charge = if (createsAccount) (config.accountCreationCharge - creationGasCost).max(BigInteger.ZERO) else BigInteger.ZERO
         return Estimate(
-            gas = gas.toLong(),
-            fee = usedGas.multiply(gasPrice).add(charge),
-            requiredBalance = gas.multiply(gasPrice.max(config.minGasPurchasePrice)).add(charge),
+            gas = full.total.toLongClamped(),
+            fee = used.total * gasPrice + charge,
+            requiredBalance = full.send * gasPrice * SEND_GAS_PRICE_MARGIN + full.execution * gasPrice.max(config.minGasPurchasePrice),
         )
     }
 
-    private val Pair<Long, Long>.total: Long get() = first + second
+    private fun BigInteger.toLongClamped(): Long = min(BigInteger.valueOf(Long.MAX_VALUE)).toLong()
+
+    companion object {
+        /**
+         * The send part of the required balance is priced at this multiple of the block gas price.
+         * The price may rise by at most 0.5% a block (nearcore `compute_next_gas_price`) between
+         * the estimate and inclusion; doubling covers about 139 blocks of steady growth. The
+         * execution part needs no margin while the block price stays below the purchase price.
+         */
+        val SEND_GAS_PRICE_MARGIN: BigInteger = BigInteger.TWO
+    }
 }

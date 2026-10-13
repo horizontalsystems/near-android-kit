@@ -4,7 +4,6 @@ import com.google.gson.JsonParser
 import io.horizontalsystems.nearkit.FakeNear
 import io.horizontalsystems.nearkit.database.Storage
 import io.horizontalsystems.nearkit.network.NoEndpointAvailable
-import io.horizontalsystems.nearkit.network.RpcError
 import io.horizontalsystems.nearkit.transaction.TransactionSender.SendError
 import kotlinx.coroutines.runBlocking
 import org.junit.After
@@ -90,15 +89,34 @@ class TransactionSenderTest {
     @Test
     fun rejectionThatCannotBeCheckedKeepsRecord() {
         near.answer("send_tx", notEnoughBalance)
-        near.answer("EXPERIMENTAL_tx_status", IOException("down"), IOException("down"))
+        near.answer("EXPERIMENTAL_tx_status", IOException("down"))
         assertThrows(SendError.Rejected::class.java) { submit() }
         assertTrue(stored!!.isPending)
     }
 
     @Test
+    fun rejectionAfterFailoverKeepsRecordWhileTheFirstNodeCannotBeAsked() {
+        // the first node may have taken it before the connection dropped; only it can say
+        near.answer("send_tx", IOException("connection reset"), notEnoughBalance)
+        near.answer("EXPERIMENTAL_tx_status", IOException("down"), FakeNear.error("UNKNOWN_TRANSACTION"))
+        assertThrows(SendError.Rejected::class.java) { submit() }
+        assertTrue(stored!!.isPending)
+        assertEquals(listOf("rpc1.test", "rpc2.test"), near.hosts.takeLast(2))
+    }
+
+    @Test
+    fun rejectionAfterFailoverFailsWhenNoNodeKnowsIt() {
+        near.answer("send_tx", IOException("connection reset"), notEnoughBalance)
+        near.answer("EXPERIMENTAL_tx_status", FakeNear.error("UNKNOWN_TRANSACTION"), FakeNear.error("UNKNOWN_TRANSACTION"))
+        assertThrows(SendError.Rejected::class.java) { submit() }
+        assertNull(stored)
+        assertEquals(emptyList<String>(), reported)
+    }
+
+    @Test
     fun unexpectedNodeErrorKeepsRecord() {
-        near.answer("send_tx", FakeNear.error("SOMETHING_NEW"))
-        assertThrows(RpcError::class.java) { submit() }
+        near.answer("send_tx", FakeNear.error("SOMETHING_NEW"), FakeNear.error("SOMETHING_NEW"))
+        assertThrows(NoEndpointAvailable::class.java) { submit() }
         assertTrue(stored!!.isPending)
     }
 

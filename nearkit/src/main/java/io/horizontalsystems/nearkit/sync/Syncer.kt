@@ -136,12 +136,8 @@ internal class Syncer(
                 _accountStateFlow.update { accountState }
             }
 
-            if (accountState.exists) {
-                syncFtBalances()
-            } else if (_ftBalancesFlow.value.isNotEmpty()) {
-                storage.replaceFtBalances(emptyList())
-                _ftBalancesFlow.update { emptyList() }
-            }
+            // a token contract credits any account id, so tokens can arrive before any NEAR does
+            syncFtBalances()
 
             hasSyncedOnce = true
             consecutiveFailures = 0
@@ -190,6 +186,10 @@ internal class Syncer(
                 throw e
             } catch (e: Throwable) {
                 logger.info("ft_balance_of failed for $contractId: ${e.message}")
+                // a token the index does not list yet would otherwise drop out until the next sync
+                if (contractId !in balances) {
+                    _ftBalancesFlow.value.firstOrNull { it.contractId == contractId }?.let { balances[contractId] = it.balance }
+                }
             }
         }
 

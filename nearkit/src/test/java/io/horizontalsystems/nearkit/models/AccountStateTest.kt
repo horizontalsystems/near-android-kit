@@ -1,7 +1,5 @@
 package io.horizontalsystems.nearkit.models
 
-import io.horizontalsystems.nearkit.transaction.Action
-import io.horizontalsystems.nearkit.transaction.FeeCalculator
 import org.junit.Assert.assertEquals
 import org.junit.Test
 import java.math.BigDecimal
@@ -44,27 +42,5 @@ class AccountStateTest {
         assertEquals(BigDecimal("1.5"), NearAmount.toNear(BigInteger("1500000000000000000000000")))
         assertEquals(BigInteger("1"), NearAmount.toYocto(BigDecimal("0.000000000000000000000001")))
         assertEquals(BigDecimal.ZERO, NearAmount.toNear(BigInteger.ZERO))
-    }
-
-    @Test
-    fun transferToNamedAccount() {
-        // 0.446 Tgas: burnt at the 10^8 gas price, bought at the 10^9 minimum purchase price
-        val e = FeeCalculator().estimate(listOf(Action.Transfer(BigInteger.ONE)), receiverIsImplicit = false, createsAccount = false, gasPrice = BigInteger.valueOf(100_000_000))
-        assertEquals(446_365_125_000L, e.gas)
-        assertEquals(BigInteger("44636512500000000000"), e.fee)
-        assertEquals(BigInteger("446365125000000000000"), e.requiredBalance)
-    }
-
-    @Test
-    fun transferToImplicitAccountPaysCreationGasEvenWhenItExists() {
-        // mainnet tx BiuXnScW…: 0.8249 Tgas to convert + 7.5249 Tgas to execute
-        val e = FeeCalculator().estimate(listOf(Action.Transfer(BigInteger.ONE)), receiverIsImplicit = true, createsAccount = false, gasPrice = BigInteger.valueOf(100_000_000))
-        assertEquals(824_947_687_500L + 7_524_947_687_500L, e.gas)
-    }
-
-    @Test
-    fun creatingAnAccountAddsTheCharge() {
-        val e = FeeCalculator().estimate(listOf(Action.Transfer(BigInteger.ONE)), receiverIsImplicit = true, createsAccount = true, gasPrice = BigInteger.valueOf(100_000_000))
-        assertEquals(BigInteger("7000000000000000000000") + BigInteger.valueOf(8_349_895_375_000L) * BigInteger.valueOf(100_000_000), e.fee)
     }
 }

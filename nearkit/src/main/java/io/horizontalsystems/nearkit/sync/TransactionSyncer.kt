@@ -19,6 +19,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
+import java.math.BigInteger
 import java.util.logging.Logger
 
 /**
@@ -172,7 +173,10 @@ internal class TransactionSyncer(
         val wanted = rows.filter { it.hash !in indexed }.distinctBy { it.hash }
         val timestamps = wanted.associate { it.hash to it.blockTimestampNanos / 1_000_000_000 }
 
+        // a lagging index can still show as executing what the node already resolved
+        val finished = storage.finishedHashes(wanted.map { it.hash })
         val converted = fetch(wanted.map { it.hash }) { timestamps[it] ?: 0 }
+            .filterNot { (tx, _) -> tx.isPending && tx.hash in finished }
         storage.saveTransactions(converted)
         return converted.map { it.first }
     }
@@ -181,7 +185,7 @@ internal class TransactionSyncer(
     private suspend fun fetch(hashes: List<String>, fallbackTimestamp: (String) -> Long): List<Pair<Transaction, Set<String>>> {
         val result = mutableListOf<Pair<Transaction, Set<String>>>()
         for (chunk in hashes.chunked(FastNearProvider.MAX_HASHES_PER_REQUEST)) {
-            result += mostComplete(fastNearProvider.transactions(chunk)).mapNotNull { (hash, item) ->
+            result += mostComplete(fastNearProvider.transactions(chunk)).filter { it.first in chunk }.mapNotNull { (hash, item) ->
                 try {
                     TransactionConverter.convert(item, accountId, fallbackTimestamp(hash))
                 } catch (e: Exception) {
@@ -224,6 +228,10 @@ internal class TransactionSyncer(
             val updated = when {
                 status != null && status.isExecuted && raw != null -> {
                     val (tx, tags) = TransactionConverter.convert(raw, accountId, pending.timestamp)
+                    if (!matches(pending, tx)) {
+                        logger.warning("Node answered ${pending.hash} with a different transaction; waiting for the index")
+                        continue
+                    }
                     // RPC outcomes carry no block time; keep the submission time until the index has it
                     tx.copy(timestamp = pending.timestamp) to tags
                 }
@@ -252,6 +260,26 @@ internal class TransactionSyncer(
         }
         if (useIndex) resolved += refetchFromIndex(unresolvedFromIndex)
         return resolved
+    }
+
+    /**
+     * Whether a node's outcome for [pending] describes that transaction. Any node in the failover
+     * list may answer, and its outcome replaces the record; one swapping in a look-alike receiver
+     * would plant it in the history as the user's own send. For a transaction the kit signed, the
+     * actions and the funds leaving the account have to be the ones signed.
+     */
+    private fun matches(pending: Transaction, resolved: Transaction): Boolean {
+        if (resolved.hash != pending.hash || resolved.signerId != pending.signerId || resolved.receiverId != pending.receiverId) return false
+        if (pending.expiresAfterHeight == null) return true
+        if (resolved.actions != pending.actions) return false
+        // counted, so a movement repeated beyond what was signed does not pass; a failed one is absent
+        val signedFt = pending.ftTransfers.groupingBy { Triple(it.contractId, it.to, it.amount) }.eachCount()
+        val sentFt = resolved.ftTransfers.filter { it.from == accountId }.groupingBy { Triple(it.contractId, it.to, it.amount) }.eachCount()
+        if (sentFt.any { (transfer, count) -> count > (signedFt[transfer] ?: 0) }) return false
+        val sentNear = resolved.nearTransfers.filter { it.from == accountId && it.success }
+        val signedDeposits = pending.actions.fold(BigInteger.ZERO) { sum, action -> sum + (action.deposit ?: BigInteger.ZERO) }
+        return sentNear.all { it.to == pending.receiverId } &&
+            sentNear.fold(BigInteger.ZERO) { sum, transfer -> sum + transfer.amount } <= signedDeposits
     }
 
     /**

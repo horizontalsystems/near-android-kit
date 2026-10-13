@@ -44,7 +44,7 @@ import java.math.BigInteger
 import java.net.URL
 import java.util.Objects
 
-class NearKit private constructor(
+class NearKit internal constructor(
     /** The account the kit syncs and signs for: implicit (64 hex) or named. */
     val accountId: String,
     val network: Network,
@@ -181,9 +181,9 @@ class NearKit private constructor(
     private suspend fun estimateFee(receiverId: String, actions: List<Action>, expectedCallGas: Long?): FeeCalculator.Estimate {
         loadFeeConfig()
         val gasPrice = syncer.chainStateFlow.value?.gasPrice ?: rpcProvider.latestBlock().gasPrice
-        val implicit = AccountId.isImplicit(receiverId)
-        val createsAccount = implicit && actions.any { it is Action.Transfer } && !doesAccountExist(receiverId)
-        return feeCalculator.estimate(actions, implicit, createsAccount, gasPrice, expectedCallGas)
+        val receiver = AccountId.type(receiverId) ?: AccountId.Type.Named
+        val createsAccount = AccountId.isImplicit(receiverId) && actions.any { it is Action.Transfer } && !doesAccountExist(receiverId)
+        return feeCalculator.estimate(actions, receiver, createsAccount, gasPrice, expectedCallGas)
     }
 
     suspend fun estimateNearTransfer(receiverId: String): FeeCalculator.Estimate =
@@ -195,6 +195,7 @@ class NearKit private constructor(
 
     /** Fee for a token transfer, plus the storage deposit the receiver still needs, if any. */
     suspend fun estimateFtTransfer(contractId: String, receiverId: String, amount: BigInteger, memo: String? = null): FtTransferEstimate {
+        requireFtReceiver(contractId, receiverId)
         val storageDeposit = ftStorageDepositRequired(contractId, receiverId)
         val actions = FtActions.transfer(receiverId, amount, memo, storageDeposit)
         return FtTransferEstimate(
@@ -239,8 +240,7 @@ class NearKit private constructor(
         estimate: FtTransferEstimate? = null,
     ): Transaction {
         val signer = requireSigner()
-        AccountId.validate(contractId)
-        AccountId.validate(receiverId)
+        requireFtReceiver(contractId, receiverId)
         require(amount.signum() > 0) { "Amount must be positive" }
         val storageDeposit = ftStorageDepositRequired(contractId, receiverId)
         if (estimate != null && estimate.storageDeposit != storageDeposit) {
@@ -303,6 +303,16 @@ class NearKit private constructor(
         if (!AccountId.isImplicit(receiverId) && !doesAccountExist(receiverId)) {
             throw SendError.ReceiverNotFound(receiverId)
         }
+    }
+
+    /**
+     * A token contract registers and credits any well-formed id, so tokens sent to a named
+     * account nobody owns, or to the token's own contract, cannot be got back.
+     */
+    private suspend fun requireFtReceiver(contractId: String, receiverId: String) {
+        AccountId.validate(contractId)
+        if (receiverId == contractId) throw SendError.ReceiverIsTokenContract()
+        requireReceiver(receiverId)
     }
 
     private fun requireSigner(): Signer = signer ?: throw WalletError.WatchOnly()
