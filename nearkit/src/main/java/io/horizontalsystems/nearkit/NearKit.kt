@@ -181,9 +181,9 @@ class NearKit internal constructor(
     private suspend fun estimateFee(receiverId: String, actions: List<Action>, expectedCallGas: Long?): FeeCalculator.Estimate {
         loadFeeConfig()
         val gasPrice = syncer.chainStateFlow.value?.gasPrice ?: rpcProvider.latestBlock().gasPrice
-        val implicit = AccountId.isImplicit(receiverId)
-        val createsAccount = implicit && actions.any { it is Action.Transfer } && !doesAccountExist(receiverId)
-        return feeCalculator.estimate(actions, implicit, createsAccount, gasPrice, expectedCallGas)
+        val receiver = AccountId.type(receiverId) ?: AccountId.Type.Named
+        val createsAccount = AccountId.isImplicit(receiverId) && actions.any { it is Action.Transfer } && !doesAccountExist(receiverId)
+        return feeCalculator.estimate(actions, receiver, createsAccount, gasPrice, expectedCallGas)
     }
 
     suspend fun estimateNearTransfer(receiverId: String): FeeCalculator.Estimate =

@@ -1,5 +1,6 @@
 package io.horizontalsystems.nearkit.transaction
 
+import io.horizontalsystems.nearkit.crypto.AccountId
 import io.horizontalsystems.nearkit.network.InvalidResponse
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertThrows
@@ -41,7 +42,7 @@ class FtActionsTest {
         val calculator = FeeCalculator()
         fun estimate(storageDeposit: BigInteger?, expectedCallGas: Long?) = calculator.estimate(
             FtActions.transfer("bob.near", BigInteger.TEN, null, storageDeposit),
-            receiverIsImplicit = false,
+            receiver = AccountId.Type.Named,
             createsAccount = false,
             gasPrice = gasPrice,
             expectedCallGas = expectedCallGas,
