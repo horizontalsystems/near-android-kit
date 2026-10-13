@@ -19,6 +19,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
+import java.math.BigInteger
 import java.util.logging.Logger
 
 /**
@@ -271,10 +272,14 @@ internal class TransactionSyncer(
         if (resolved.hash != pending.hash || resolved.signerId != pending.signerId || resolved.receiverId != pending.receiverId) return false
         if (pending.expiresAfterHeight == null) return true
         if (resolved.actions != pending.actions) return false
-        val signedFt = pending.ftTransfers.map { Triple(it.contractId, it.to, it.amount) }
-        val sentFt = resolved.ftTransfers.filter { it.from == accountId }.map { Triple(it.contractId, it.to, it.amount) }
+        // counted, so a movement repeated beyond what was signed does not pass; a failed one is absent
+        val signedFt = pending.ftTransfers.groupingBy { Triple(it.contractId, it.to, it.amount) }.eachCount()
+        val sentFt = resolved.ftTransfers.filter { it.from == accountId }.groupingBy { Triple(it.contractId, it.to, it.amount) }.eachCount()
+        if (sentFt.any { (transfer, count) -> count > (signedFt[transfer] ?: 0) }) return false
         val sentNear = resolved.nearTransfers.filter { it.from == accountId && it.success }
-        return signedFt.containsAll(sentFt) && sentNear.all { it.to == pending.receiverId }
+        val signedDeposits = pending.actions.fold(BigInteger.ZERO) { sum, action -> sum + (action.deposit ?: BigInteger.ZERO) }
+        return sentNear.all { it.to == pending.receiverId } &&
+            sentNear.fold(BigInteger.ZERO) { sum, transfer -> sum + transfer.amount } <= signedDeposits
     }
 
     /**
