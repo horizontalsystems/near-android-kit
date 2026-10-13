@@ -155,6 +155,9 @@ internal interface TransactionDao {
     @Query("SELECT hash FROM `Transaction` WHERE hash IN (:hashes) AND blockHeight IS NOT NULL AND status != 'Pending'")
     fun indexedHashes(hashes: List<String>): List<String>
 
+    @Query("SELECT hash FROM `Transaction` WHERE hash IN (:hashes) AND status != 'Pending'")
+    fun finishedHashes(hashes: List<String>): List<String>
+
     // Ties on timestamp are broken by hash so that paging with (timestamp, hash) is stable
     @Query("SELECT * FROM `Transaction` WHERE (:beforeTimestamp IS NULL OR timestamp < :beforeTimestamp OR (timestamp = :beforeTimestamp AND hash < :beforeHash)) ORDER BY timestamp DESC, hash DESC LIMIT :limit")
     fun getPage(beforeTimestamp: Long?, beforeHash: String, limit: Int): List<Transaction>
@@ -170,6 +173,9 @@ internal interface TransactionDao {
 
     @Query("DELETE FROM TransactionTag WHERE hash = :hash")
     fun deleteTags(hash: String)
+
+    @Query("DELETE FROM `Transaction` WHERE hash = :hash")
+    fun delete(hash: String)
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     fun insertTags(tags: List<TransactionTag>)

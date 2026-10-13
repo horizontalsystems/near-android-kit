@@ -74,17 +74,17 @@ class TransactionSender internal constructor(
             expiresAfterHeight = height + TRANSACTION_VALIDITY_BLOCKS,
             nowSeconds = System.currentTimeMillis() / 1000,
         )
-        val savePending = {
-            storage.saveTransactions(listOf(pending to tags))
-            onPendingSaved(pending)
-        }
+        // Saved before sending: once send_tx is out the transaction may be on chain, and a record
+        // that failed to save then, or a process killed mid-request, would invite a second send.
+        // It is reported only once the outcome is known, so a clean rejection never shows up.
+        storage.saveTransactions(listOf(pending to tags))
 
         val error = try {
             rpcProvider.sendTransaction(Base64.getEncoder().encodeToString(signed.encode()), waitUntil = "INCLUDED")
             null
         } catch (e: CancellationException) {
             // cancelled mid-request: the transaction may be out
-            withContext(NonCancellable) { savePending() }
+            withContext(NonCancellable) { onPendingSaved(pending) }
             throw e
         } catch (e: Exception) {
             e
@@ -93,21 +93,24 @@ class TransactionSender internal constructor(
         if (error is RpcError && error.name == RpcProvider.INVALID_TRANSACTION) {
             val rejected = SendError.Rejected(error.data?.toString() ?: error.message ?: error.name)
             when (isKnown(signed)) {
-                false -> throw rejected
+                false -> {
+                    storage.deleteTransaction(pending.hash)
+                    throw rejected
+                }
                 // an earlier attempt got it on chain; this is a refusal of the duplicate
                 true -> {
-                    savePending()
+                    onPendingSaved(pending)
                     return pending
                 }
                 // cannot tell: keep the record, which expires to failed if the rejection was real
                 null -> {
-                    savePending()
+                    onPendingSaved(pending)
                     throw rejected
                 }
             }
         }
 
-        savePending()
+        onPendingSaved(pending)
         if (error != null) throw error
         return pending
     }
@@ -130,6 +133,9 @@ class TransactionSender internal constructor(
 
         /** Transfers to a named account that does not exist fail on chain and are refused up front. */
         class ReceiverNotFound(val receiverId: String) : SendError("Account $receiverId does not exist")
+
+        /** A token sent to its own contract is credited to the contract and lost. */
+        class ReceiverIsTokenContract : SendError("The receiver is the token contract itself")
 
         /** The node refused the transaction, e.g. `{"TxExecutionError":{"InvalidTxError":{"NotEnoughBalance":…}}}`. */
         class Rejected(val details: String) : SendError(details)

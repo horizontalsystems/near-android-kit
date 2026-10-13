@@ -30,6 +30,9 @@ internal class Storage(private val database: MainDatabase) {
     fun indexedHashes(hashes: List<String>): Set<String> =
         hashes.chunked(500).flatMap { database.transactionDao().indexedHashes(it) }.toSet()
 
+    fun finishedHashes(hashes: List<String>): Set<String> =
+        hashes.chunked(500).flatMap { database.transactionDao().finishedHashes(it) }.toSet()
+
     fun getTransactions(token: String?, beforeTimestamp: Long?, beforeHash: String?, limit: Int): List<Transaction> {
         // without a hash, everything at beforeTimestamp is excluded ("" sorts before any hash)
         val hash = beforeHash ?: ""
@@ -43,6 +46,11 @@ internal class Storage(private val database: MainDatabase) {
             database.transactionDao().deleteTags(transaction.hash)
             database.transactionDao().insertTags(tags.map { TransactionTag(transaction.hash, it) })
         }
+    }
+
+    fun deleteTransaction(hash: String) = database.runInTransaction {
+        database.transactionDao().deleteTags(hash)
+        database.transactionDao().delete(hash)
     }
 
     fun getTransactionSyncState(): TransactionSyncState? = database.transactionSyncStateDao().get()
