@@ -43,13 +43,9 @@ class RpcProvider private constructor(
     @Volatile
     private var preferredSince = 0L
 
-    suspend fun call(method: String, params: JsonElement): JsonElement {
-        val request = JsonObject().apply {
-            addProperty("jsonrpc", "2.0")
-            addProperty("id", "nearkit")
-            addProperty("method", method)
-            add("params", params)
-        }
+    /** [reached] collects every endpoint the request was put to, whether or not it answered. */
+    suspend fun call(method: String, params: JsonElement, reached: MutableSet<URL>? = null): JsonElement {
+        val request = request(method, params)
 
         var lastError: Throwable? = null
         for (pass in 0 until PASSES) {
@@ -59,19 +55,20 @@ class RpcProvider private constructor(
                 if (lastError?.let { NetworkErrors.isDnsFailure(it) } != true) break
                 delay(DNS_RETRY_DELAY_MS)
             }
-            lastError = callOnce(method, request) { return it }
+            lastError = callOnce(method, request, reached) { return it }
         }
         throw NoEndpointAvailable(lastError)
     }
 
     /** Tries every endpoint once; invokes [onResult] with the first good result, else returns the last error. */
-    private suspend inline fun callOnce(method: String, request: JsonObject, onResult: (JsonElement) -> Unit): Throwable? {
+    private suspend inline fun callOnce(method: String, request: JsonObject, reached: MutableSet<URL>?, onResult: (JsonElement) -> Unit): Throwable? {
         var lastError: Throwable? = null
         if (preferredIndex != 0 && now() - preferredSince > PREFERRED_ENDPOINT_TTL_MS) preferredIndex = 0
         val start = preferredIndex
         for (attempt in endpoints.indices) {
             val index = (start + attempt) % endpoints.size
             val endpoint = endpoints[index]
+            reached?.add(endpoint.url)
             try {
                 val response = endpoint.api.call(request)
                 response.getAsJsonObjectOrNull("error")?.let { throw parseError(it) }
@@ -94,6 +91,13 @@ class RpcProvider private constructor(
             }
         }
         return lastError
+    }
+
+    private fun request(method: String, params: JsonElement) = JsonObject().apply {
+        addProperty("jsonrpc", "2.0")
+        addProperty("id", "nearkit")
+        addProperty("method", method)
+        add("params", params)
     }
 
     private fun parseError(error: JsonObject): RpcError {
@@ -222,27 +226,53 @@ class RpcProvider private constructor(
      * transaction is in a block; invalid transactions (bad nonce, not enough balance, expired)
      * are rejected with [RpcError] name INVALID_TRANSACTION.
      */
-    suspend fun sendTransaction(signedTxBase64: String, waitUntil: String = "INCLUDED"): TxStatus {
+    /** [reached] collects every endpoint the transaction was put to; any of them may hold it. */
+    suspend fun sendTransaction(signedTxBase64: String, waitUntil: String = "INCLUDED", reached: MutableSet<URL>? = null): TxStatus {
         val result = call("send_tx", JsonObject().apply {
             addProperty("signed_tx_base64", signedTxBase64)
             addProperty("wait_until", waitUntil)
-        }).asJsonObject
+        }, reached).asJsonObject
         return TxStatus(result.optString("final_execution_status") ?: waitUntil, result.takeIf { it.has("transaction") })
     }
 
     /** Null when no node knows the transaction (not yet seen, or dropped). */
     suspend fun transactionStatus(hash: String, senderAccountId: String): TxStatus? {
         val result = try {
-            call("EXPERIMENTAL_tx_status", JsonObject().apply {
-                addProperty("tx_hash", hash)
-                addProperty("sender_account_id", senderAccountId)
-                addProperty("wait_until", "NONE")
-            }).asJsonObject
+            call("EXPERIMENTAL_tx_status", txStatusParams(hash, senderAccountId)).asJsonObject
         } catch (e: RpcError) {
             if (e.name == UNKNOWN_TRANSACTION) return null
             throw e
         }
         return TxStatus(result.optString("final_execution_status") ?: "NONE", result.takeIf { it.has("transaction") })
+    }
+
+    /**
+     * Whether any of [urls] knows the transaction; null when one of them could not answer and none
+     * knew it. Each is asked, since one node's UNKNOWN_TRANSACTION says nothing of what another
+     * accepted and has not passed on yet.
+     */
+    suspend fun isTransactionKnown(hash: String, senderAccountId: String, urls: Collection<URL>): Boolean? {
+        val request = request("EXPERIMENTAL_tx_status", txStatusParams(hash, senderAccountId))
+        var allAnswered = true
+        for (endpoint in endpoints.filter { it.url in urls }) {
+            try {
+                val response = endpoint.api.call(request)
+                val error = response.getAsJsonObjectOrNull("error") ?: return true
+                if (parseError(error).name != UNKNOWN_TRANSACTION) allAnswered = false
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Throwable) {
+                logger.info("EXPERIMENTAL_tx_status failed on ${endpoint.url}: ${e.message}")
+                allAnswered = false
+            }
+        }
+        return if (allAnswered) false else null
+    }
+
+    private fun txStatusParams(hash: String, senderAccountId: String) = JsonObject().apply {
+        addProperty("tx_hash", hash)
+        addProperty("sender_account_id", senderAccountId)
+        addProperty("wait_until", "NONE")
     }
 
     companion object {

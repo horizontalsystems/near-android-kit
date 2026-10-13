@@ -12,6 +12,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.math.BigInteger
+import java.net.URL
 import java.util.Base64
 import io.horizontalsystems.nearkit.transaction.Transaction as UnsignedTransaction
 
@@ -79,8 +80,9 @@ class TransactionSender internal constructor(
         // It is reported only once the outcome is known, so a clean rejection never shows up.
         storage.saveTransactions(listOf(pending to tags))
 
+        val reached = mutableSetOf<URL>()
         val error = try {
-            rpcProvider.sendTransaction(Base64.getEncoder().encodeToString(signed.encode()), waitUntil = "INCLUDED")
+            rpcProvider.sendTransaction(Base64.getEncoder().encodeToString(signed.encode()), waitUntil = "INCLUDED", reached)
             null
         } catch (e: CancellationException) {
             // cancelled mid-request: the transaction may be out
@@ -92,7 +94,7 @@ class TransactionSender internal constructor(
 
         if (error is RpcError && error.name == RpcProvider.INVALID_TRANSACTION) {
             val rejected = SendError.Rejected(error.data?.toString() ?: error.message ?: error.name)
-            when (isKnown(signed)) {
+            when (isKnown(signed, reached)) {
                 false -> {
                     storage.deleteTransaction(pending.hash)
                     throw rejected
@@ -115,9 +117,12 @@ class TransactionSender internal constructor(
         return pending
     }
 
-    /** Whether a node knows the transaction; null when that cannot be told right now. */
-    private suspend fun isKnown(signed: SignedTransaction): Boolean? = try {
-        rpcProvider.transactionStatus(signed.hash, signed.transaction.signerId) != null
+    /**
+     * Whether a node the send reached knows the transaction; null when that cannot be told right
+     * now. A node that failed before the rejecting one answered may still have accepted it.
+     */
+    private suspend fun isKnown(signed: SignedTransaction, reached: Set<URL>): Boolean? = try {
+        rpcProvider.isTransactionKnown(signed.hash, signed.transaction.signerId, reached)
     } catch (e: CancellationException) {
         throw e
     } catch (e: Exception) {
