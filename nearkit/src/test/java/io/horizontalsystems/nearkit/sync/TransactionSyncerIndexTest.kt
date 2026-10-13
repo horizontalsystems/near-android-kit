@@ -4,6 +4,7 @@ import com.google.gson.JsonParser
 import io.horizontalsystems.nearkit.FakeNear
 import io.horizontalsystems.nearkit.NearKit.SyncState
 import io.horizontalsystems.nearkit.database.Storage
+import io.horizontalsystems.nearkit.models.Transaction
 import io.horizontalsystems.nearkit.models.TransactionSyncState
 import io.horizontalsystems.nearkit.models.TransactionTag
 import kotlinx.coroutines.runBlocking
@@ -80,6 +81,32 @@ class TransactionSyncerIndexTest {
         sync()
         assertTrue(stored.isSuccess)
         assertEquals(1, stored.nearTransfers.count { it.to == account })
+    }
+
+    @Test
+    fun laggingIndexDoesNotReopenAResolvedTransaction() {
+        // the node already reported the outcome; the index is still executing the receipts
+        val resolved = Transaction(
+            hash = hash, blockHeight = null, timestamp = 1, signerId = account, receiverId = "wrap.near",
+            actions = emptyList(), nearTransfers = emptyList(), ftTransfers = emptyList(), fee = BigInteger.TEN,
+            status = Transaction.Status.Success, failure = null, expiresAfterHeight = null,
+        )
+        storage.saveTransactions(listOf(resolved to setOf("wrap.near")))
+        near.answer("/v0/account", accountPage(hash))
+        near.answer("/v0/transactions", """{"transactions":[${withdraw(complete = false)}]}""")
+        sync()
+        assertTrue(stored.isSuccess)
+        assertEquals(BigInteger.TEN, stored.fee)
+    }
+
+    @Test
+    fun hashesNotAskedForAreDropped() {
+        val other = "OtherTx22222222222222222222222222222222222"
+        near.answer("/v0/account", accountPage(hash))
+        near.answer("/v0/transactions", """{"transactions":[${withdraw(complete = true)},${withdraw(complete = true).replace(hash, other)}]}""")
+        sync()
+        assertTrue(stored.isSuccess)
+        assertEquals(null, storage.getTransaction(other))
     }
 
     @Test
