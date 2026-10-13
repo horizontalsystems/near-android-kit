@@ -4,7 +4,6 @@ import com.google.gson.JsonParser
 import io.horizontalsystems.nearkit.FakeNear
 import io.horizontalsystems.nearkit.database.Storage
 import io.horizontalsystems.nearkit.network.NoEndpointAvailable
-import io.horizontalsystems.nearkit.network.RpcError
 import io.horizontalsystems.nearkit.transaction.TransactionSender.SendError
 import kotlinx.coroutines.runBlocking
 import org.junit.After
@@ -97,8 +96,8 @@ class TransactionSenderTest {
 
     @Test
     fun unexpectedNodeErrorKeepsRecord() {
-        near.answer("send_tx", FakeNear.error("SOMETHING_NEW"))
-        assertThrows(RpcError::class.java) { submit() }
+        near.answer("send_tx", FakeNear.error("SOMETHING_NEW"), FakeNear.error("SOMETHING_NEW"))
+        assertThrows(NoEndpointAvailable::class.java) { submit() }
         assertTrue(stored!!.isPending)
     }
 

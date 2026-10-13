@@ -22,7 +22,10 @@ import java.util.logging.Logger
  * move to the next URL; a deterministic error (unknown account, invalid transaction) is thrown
  * to the caller as [RpcError] without failover, because every node would answer the same.
  */
-class RpcProvider private constructor(private val endpoints: List<Endpoint>) {
+class RpcProvider private constructor(
+    private val endpoints: List<Endpoint>,
+    private val now: () -> Long,
+) {
 
     private class Endpoint(val url: URL, val api: RpcApi)
 
@@ -33,8 +36,12 @@ class RpcProvider private constructor(private val endpoints: List<Endpoint>) {
 
     private val logger = Logger.getLogger("NearKit")
 
+    // The endpoint that last answered is asked first, but not for good: a single failure of the
+    // first endpoint would otherwise route everything to a fallback operator from then on.
     @Volatile
     private var preferredIndex = 0
+    @Volatile
+    private var preferredSince = 0L
 
     suspend fun call(method: String, params: JsonElement): JsonElement {
         val request = JsonObject().apply {
@@ -60,15 +67,20 @@ class RpcProvider private constructor(private val endpoints: List<Endpoint>) {
     /** Tries every endpoint once; invokes [onResult] with the first good result, else returns the last error. */
     private suspend inline fun callOnce(method: String, request: JsonObject, onResult: (JsonElement) -> Unit): Throwable? {
         var lastError: Throwable? = null
+        if (preferredIndex != 0 && now() - preferredSince > PREFERRED_ENDPOINT_TTL_MS) preferredIndex = 0
+        val start = preferredIndex
         for (attempt in endpoints.indices) {
-            val index = (preferredIndex + attempt) % endpoints.size
+            val index = (start + attempt) % endpoints.size
             val endpoint = endpoints[index]
             try {
                 val response = endpoint.api.call(request)
                 response.getAsJsonObjectOrNull("error")?.let { throw parseError(it) }
                 val result = response.get("result")?.takeUnless { it.isJsonNull }
                     ?: throw InvalidResponse("$method: missing result")
-                preferredIndex = index
+                if (index != preferredIndex) {
+                    preferredIndex = index
+                    preferredSince = now()
+                }
                 onResult(result)
             } catch (e: CancellationException) {
                 throw e
@@ -241,8 +253,12 @@ class RpcProvider private constructor(private val endpoints: List<Endpoint>) {
 
         private const val PASSES = 2
         private const val DNS_RETRY_DELAY_MS = 1500L
+        internal const val PREFERRED_ENDPOINT_TTL_MS = 5 * 60_000L
 
-        fun create(urls: List<URL>, client: OkHttpClient = ApiClient.build()): RpcProvider {
+        fun create(urls: List<URL>, client: OkHttpClient = ApiClient.build()): RpcProvider =
+            create(urls, client, System::currentTimeMillis)
+
+        internal fun create(urls: List<URL>, client: OkHttpClient, now: () -> Long): RpcProvider {
             require(urls.isNotEmpty()) { "At least one RPC URL is required" }
             val endpoints = urls.map { url ->
                 val retrofit = Retrofit.Builder()
@@ -252,7 +268,7 @@ class RpcProvider private constructor(private val endpoints: List<Endpoint>) {
                     .build()
                 Endpoint(url, retrofit.create(RpcApi::class.java))
             }
-            return RpcProvider(endpoints)
+            return RpcProvider(endpoints, now)
         }
     }
 }

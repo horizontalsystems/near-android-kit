@@ -31,6 +31,9 @@ internal class FakeNear {
     /** Every request as (key, body), in order. */
     val requests = mutableListOf<Pair<String, String>>()
 
+    /** The host of every request, in order. */
+    val hosts = mutableListOf<String>()
+
     class Http(val code: Int, val body: String = "", val headers: Map<String, String> = emptyMap())
 
     /** [key] is an RPC method or a FastNEAR path such as `/v0/transactions`. */
@@ -47,7 +50,10 @@ internal class FakeNear {
         } else {
             request.url.encodedPath
         }
-        synchronized(requests) { requests += key to requestBody }
+        synchronized(requests) {
+            requests += key to requestBody
+            hosts += request.url.host
+        }
         val answer = synchronized(answers) { answers[key]?.removeFirstOrNull() }
         val builder = Response.Builder()
             .request(request)
@@ -70,7 +76,10 @@ internal class FakeNear {
         builder.body(body.toResponseBody("application/json".toMediaType())).build()
     }.build()
 
-    val rpcProvider: RpcProvider = RpcProvider.create(listOf(URL("https://rpc1.test/"), URL("https://rpc2.test/")), client)
+    val rpcUrls = listOf(URL("https://rpc1.test/"), URL("https://rpc2.test/"))
+    val rpcProvider: RpcProvider = RpcProvider.create(rpcUrls, client)
+
+    fun rpcProvider(now: () -> Long): RpcProvider = RpcProvider.create(rpcUrls, client, now)
     val fastNearProvider: FastNearProvider = FastNearProvider.create(URL("https://api.fastnear.test/"), URL("https://tx.fastnear.test/"), client)
 
     companion object {
